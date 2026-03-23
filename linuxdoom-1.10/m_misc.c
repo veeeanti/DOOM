@@ -27,13 +27,25 @@
 static const char
 rcsid[] = "$Id: m_misc.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 
+#ifdef NORMALUNIX
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-
 #include <ctype.h>
+#elif defined(_WIN32)
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <ctype.h>
+#ifdef _MSC_VER
+#define fstat _fstat
+#endif
+#endif
 
 
 #include "doomdef.h"
@@ -225,8 +237,8 @@ extern char*	chat_macros[];
 typedef struct
 {
     char*	name;
-    int*	location;
-    int		defaultvalue;
+    void*	location;
+    intptr_t	defaultvalue;
     int		scantranslate;		// PC scan code hack
     int		untranslated;		// lousy hack
 } default_t;
@@ -254,15 +266,15 @@ default_t	defaults[] =
 
 // UNIX hack, to be removed. 
 #ifdef SNDSERV
-    {"sndserver", (int *) &sndserver_filename, (int) "sndserver"},
+    {"sndserver", &sndserver_filename, (intptr_t) "sndserver"},
     {"mb_used", &mb_used, 2},
 #endif
     
 #endif
 
 #ifdef LINUX
-    {"mousedev", (int*)&mousedev, (int)"/dev/ttyS0"},
-    {"mousetype", (int*)&mousetype, (int)"microsoft"},
+    {"mousedev", &mousedev, (intptr_t)"/dev/ttyS0"},
+    {"mousetype", &mousetype, (intptr_t)"microsoft"},
 #endif
 
     {"use_mouse",&usemouse, 1},
@@ -285,16 +297,16 @@ default_t	defaults[] =
 
     {"usegamma",&usegamma, 0},
 
-    {"chatmacro0", (int *) &chat_macros[0], (int) HUSTR_CHATMACRO0 },
-    {"chatmacro1", (int *) &chat_macros[1], (int) HUSTR_CHATMACRO1 },
-    {"chatmacro2", (int *) &chat_macros[2], (int) HUSTR_CHATMACRO2 },
-    {"chatmacro3", (int *) &chat_macros[3], (int) HUSTR_CHATMACRO3 },
-    {"chatmacro4", (int *) &chat_macros[4], (int) HUSTR_CHATMACRO4 },
-    {"chatmacro5", (int *) &chat_macros[5], (int) HUSTR_CHATMACRO5 },
-    {"chatmacro6", (int *) &chat_macros[6], (int) HUSTR_CHATMACRO6 },
-    {"chatmacro7", (int *) &chat_macros[7], (int) HUSTR_CHATMACRO7 },
-    {"chatmacro8", (int *) &chat_macros[8], (int) HUSTR_CHATMACRO8 },
-    {"chatmacro9", (int *) &chat_macros[9], (int) HUSTR_CHATMACRO9 }
+    {"chatmacro0", &chat_macros[0], (intptr_t) HUSTR_CHATMACRO0 },
+    {"chatmacro1", &chat_macros[1], (intptr_t) HUSTR_CHATMACRO1 },
+    {"chatmacro2", &chat_macros[2], (intptr_t) HUSTR_CHATMACRO2 },
+    {"chatmacro3", &chat_macros[3], (intptr_t) HUSTR_CHATMACRO3 },
+    {"chatmacro4", &chat_macros[4], (intptr_t) HUSTR_CHATMACRO4 },
+    {"chatmacro5", &chat_macros[5], (intptr_t) HUSTR_CHATMACRO5 },
+    {"chatmacro6", &chat_macros[6], (intptr_t) HUSTR_CHATMACRO6 },
+    {"chatmacro7", &chat_macros[7], (intptr_t) HUSTR_CHATMACRO7 },
+    {"chatmacro8", &chat_macros[8], (intptr_t) HUSTR_CHATMACRO8 },
+    {"chatmacro9", &chat_macros[9], (intptr_t) HUSTR_CHATMACRO9 }
 
 };
 
@@ -320,11 +332,11 @@ void M_SaveDefaults (void)
 	if (defaults[i].defaultvalue > -0xfff
 	    && defaults[i].defaultvalue < 0xfff)
 	{
-	    v = *defaults[i].location;
+        v = *(int *)defaults[i].location;
 	    fprintf (f,"%s\t\t%i\n",defaults[i].name,v);
 	} else {
 	    fprintf (f,"%s\t\t\"%s\"\n",defaults[i].name,
-		     * (char **) (defaults[i].location));
+                 *(char **)defaults[i].location);
 	}
     }
 	
@@ -351,7 +363,13 @@ void M_LoadDefaults (void)
     // set everything to base values
     numdefaults = sizeof(defaults)/sizeof(defaults[0]);
     for (i=0 ; i<numdefaults ; i++)
-	*defaults[i].location = defaults[i].defaultvalue;
+    {
+    if (defaults[i].defaultvalue > -0xfff
+        && defaults[i].defaultvalue < 0xfff)
+        *(int *)defaults[i].location = (int)defaults[i].defaultvalue;
+    else
+        *(char **)defaults[i].location = (char *)defaults[i].defaultvalue;
+    }
     
     // check for a custom default file
     i = M_CheckParm ("-config");
@@ -389,10 +407,9 @@ void M_LoadDefaults (void)
 		    if (!strcmp(def, defaults[i].name))
 		    {
 			if (!isstring)
-			    *defaults[i].location = parm;
+                *(int *)defaults[i].location = parm;
 			else
-			    *defaults[i].location =
-				(int) newstring;
+                *(char **)defaults[i].location = newstring;
 			break;
 		    }
 	    }

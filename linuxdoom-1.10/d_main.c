@@ -574,6 +574,8 @@ void IdentifyVersion (void)
 
 #ifdef NORMALUNIX
     char *home;
+	char *homedrive;
+	char *homepath;
     char *doomwaddir;
     doomwaddir = getenv("DOOMWADDIR");
     if (!doomwaddir)
@@ -610,7 +612,21 @@ void IdentifyVersion (void)
 
     home = getenv("HOME");
     if (!home)
-      I_Error("Please set $HOME to your home directory");
+    {
+	home = getenv("USERPROFILE");
+	if (!home)
+	{
+	    homedrive = getenv("HOMEDRIVE");
+	    homepath = getenv("HOMEPATH");
+	    if (homedrive && homepath)
+	    {
+		home = malloc(strlen(homedrive) + strlen(homepath) + 1);
+		sprintf(home, "%s%s", homedrive, homepath);
+	    }
+	}
+    }
+    if (!home)
+      I_Error("Please set HOME or USERPROFILE to your home directory");
     sprintf(basedefault, "%s/.doomrc", home);
 #endif
 

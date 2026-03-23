@@ -42,6 +42,8 @@ rcsid[] = "$Id: r_draw.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 // State.
 #include "doomstat.h"
 
+#include <stdint.h>
+
 
 // ?
 #define MAXWIDTH			1120
@@ -461,7 +463,7 @@ void R_InitTranslationTables (void)
     int		i;
 	
     translationtables = Z_Malloc (256*3+255, PU_STATIC, 0);
-    translationtables = (byte *)(( (int)translationtables + 255 )& ~255);
+    translationtables = (byte *)((((uintptr_t)translationtables) + 255u) & ~(uintptr_t)255u);
     
     // translate just the 16 green colors
     for (i=0 ; i<256 ; i++)

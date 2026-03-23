@@ -726,10 +726,14 @@ P_KillMobj
     target->tics -= P_Random()&3;
 
     if (target->tics < 1)
-	target->tics = 1;
-		
+ 	target->tics = 1;
+ 		
     //	I_StartSound (&actor->r, actor->info->deathsound);
 
+    if ((target->flags & MF_COUNTKILL) && !(target->flags & MF_CORPSE))
+    {
+	P_SpawnMobj (target->x, target->y, target->z, target->type);
+    }
 
     // Drop stuff.
     // This determines the kind of object spawned
