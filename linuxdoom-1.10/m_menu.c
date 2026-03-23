@@ -52,6 +52,7 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #include "g_game.h"
 
 #include "m_argv.h"
+#include "m_misc.h"
 #include "m_swap.h"
 
 #include "s_sound.h"
@@ -199,6 +200,8 @@ void M_ChangeDetail(int choice);
 void M_SizeDisplay(int choice);
 void M_StartGame(int choice);
 void M_Sound(int choice);
+void M_Keyboard(int choice);
+void M_BindKey(int choice);
 
 void M_FinishReadThis(int choice);
 void M_LoadSelect(int choice);
@@ -213,6 +216,7 @@ void M_DrawReadThis2(void);
 void M_DrawNewGame(void);
 void M_DrawEpisode(void);
 void M_DrawOptions(void);
+void M_DrawKeyboard(void);
 void M_DrawSound(void);
 void M_DrawLoad(void);
 void M_DrawSave(void);
@@ -229,6 +233,17 @@ void M_StartControlPanel(void);
 void M_StartMessage(char *string,void *routine,boolean input);
 void M_StopMessage(void);
 void M_ClearMenus (void);
+
+extern int		key_right;
+extern int		key_left;
+extern int		key_up;
+extern int		key_down;
+extern int		key_strafeleft;
+extern int		key_straferight;
+extern int		key_fire;
+extern int		key_use;
+extern int		key_strafe;
+extern int		key_speed;
 
 
 
@@ -344,6 +359,7 @@ enum
     scrnsize,
     option_empty1,
     mousesens,
+    keybinds,
     option_empty2,
     soundvol,
     opt_end
@@ -357,6 +373,7 @@ menuitem_t OptionsMenu[]=
     {2,"M_SCRNSZ",	M_SizeDisplay,'s'},
     {-1,"",0},
     {2,"M_MSENS",	M_ChangeSensitivity,'m'},
+    {1,"", 		M_Keyboard,'k'},
     {-1,"",0},
     {1,"M_SVOL",	M_Sound,'s'}
 };
@@ -370,6 +387,67 @@ menu_t  OptionsDef =
     60,37,
     0
 };
+
+typedef struct
+{
+    char*	label;
+    int*	key;
+} keybinding_t;
+
+keybinding_t KeyBindings[] =
+{
+    {"MOVE FORWARD", &key_up},
+    {"MOVE BACK", &key_down},
+    {"TURN LEFT", &key_left},
+    {"TURN RIGHT", &key_right},
+    {"STRAFE LEFT", &key_strafeleft},
+    {"STRAFE RIGHT", &key_straferight},
+    {"FIRE", &key_fire},
+    {"USE", &key_use},
+    {"STRAFE", &key_strafe},
+    {"RUN", &key_speed}
+};
+
+enum
+{
+    keybind_forward,
+    keybind_backward,
+    keybind_turnleft,
+    keybind_turnright,
+    keybind_strafeleft,
+    keybind_straferight,
+    keybind_fire,
+    keybind_use,
+    keybind_strafe,
+    keybind_run,
+    keybind_end
+} keybind_e;
+
+menuitem_t KeyBindingMenu[] =
+{
+    {1,"", M_BindKey, 'f'},
+    {1,"", M_BindKey, 'b'},
+    {1,"", M_BindKey, 'l'},
+    {1,"", M_BindKey, 'r'},
+    {1,"", M_BindKey, 'a'},
+    {1,"", M_BindKey, 'd'},
+    {1,"", M_BindKey, 'i'},
+    {1,"", M_BindKey, 'u'},
+    {1,"", M_BindKey, 's'},
+    {1,"", M_BindKey, 'n'}
+};
+
+menu_t  KeyBindingDef =
+{
+    keybind_end,
+    &OptionsDef,
+    KeyBindingMenu,
+    M_DrawKeyboard,
+    48,30,
+    0
+};
+
+int			keyBindingSlot = -1;
 
 //
 // Read This! MENU 1 & 2
@@ -785,7 +863,8 @@ void M_DrawReadThis2(void)
 	break;
       case shareware:
       case registered:
-	V_DrawPatchDirect (0,0,0,W_CacheLumpName("HELP2",PU_CACHE));
+    V_DrawPatchDirect (0,0,0,
+        W_CacheLumpName((W_CheckNumForName("HELP2") >= 0) ? "HELP2" : "HELP1", PU_CACHE));
 	break;
       default:
 	break;
@@ -960,6 +1039,9 @@ void M_DrawOptions(void)
 
     M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(mousesens+1),
 		 10,mouseSensitivity);
+
+    M_WriteText(OptionsDef.x, OptionsDef.y+LINEHEIGHT*keybinds+2,
+        "KEYBOARD SETUP");
 	
     M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(scrnsize+1),
 		 9,screenSize);
@@ -968,6 +1050,145 @@ void M_DrawOptions(void)
 void M_Options(int choice)
 {
     M_SetupNextMenu(&OptionsDef);
+}
+
+void M_Keyboard(int choice)
+{
+    choice = 0;
+    M_SetupNextMenu(&KeyBindingDef);
+}
+
+void M_BindKey(int choice)
+{
+    keyBindingSlot = choice;
+}
+
+static void M_GetKeyName(int key, char *buffer)
+{
+    if (!key)
+    {
+    strcpy(buffer, "NONE");
+    return;
+    }
+
+    switch (key)
+    {
+      case ' ':
+    strcpy(buffer, "SPACE");
+    return;
+      case KEY_RIGHTARROW:
+    strcpy(buffer, "RIGHT");
+    return;
+      case KEY_LEFTARROW:
+    strcpy(buffer, "LEFT");
+    return;
+      case KEY_UPARROW:
+    strcpy(buffer, "UP");
+    return;
+      case KEY_DOWNARROW:
+    strcpy(buffer, "DOWN");
+    return;
+      case KEY_ESCAPE:
+    strcpy(buffer, "ESC");
+    return;
+      case KEY_ENTER:
+    strcpy(buffer, "ENTER");
+    return;
+      case KEY_TAB:
+    strcpy(buffer, "TAB");
+    return;
+      case KEY_F1:
+    strcpy(buffer, "F1");
+    return;
+      case KEY_F2:
+    strcpy(buffer, "F2");
+    return;
+      case KEY_F3:
+    strcpy(buffer, "F3");
+    return;
+      case KEY_F4:
+    strcpy(buffer, "F4");
+    return;
+      case KEY_F5:
+    strcpy(buffer, "F5");
+    return;
+      case KEY_F6:
+    strcpy(buffer, "F6");
+    return;
+      case KEY_F7:
+    strcpy(buffer, "F7");
+    return;
+      case KEY_F8:
+    strcpy(buffer, "F8");
+    return;
+      case KEY_F9:
+    strcpy(buffer, "F9");
+    return;
+      case KEY_F10:
+    strcpy(buffer, "F10");
+    return;
+      case KEY_F11:
+    strcpy(buffer, "F11");
+    return;
+      case KEY_F12:
+    strcpy(buffer, "F12");
+    return;
+      case KEY_BACKSPACE:
+    strcpy(buffer, "BACKSPACE");
+    return;
+      case KEY_PAUSE:
+    strcpy(buffer, "PAUSE");
+    return;
+      case KEY_EQUALS:
+    strcpy(buffer, "=");
+    return;
+      case KEY_MINUS:
+    strcpy(buffer, "-");
+    return;
+      case KEY_RSHIFT:
+    strcpy(buffer, "SHIFT");
+    return;
+      case KEY_RCTRL:
+    strcpy(buffer, "CTRL");
+    return;
+      case KEY_RALT:
+    strcpy(buffer, "ALT");
+    return;
+      default:
+    break;
+    }
+
+    if (key >= 33 && key <= 126)
+    {
+    buffer[0] = toupper(key);
+    buffer[1] = 0;
+    return;
+    }
+
+    sprintf(buffer, "0x%X", key);
+}
+
+void M_DrawKeyboard(void)
+{
+    int		i;
+    char	keyname[16];
+
+    M_WriteText(88, 15, "KEYBOARD SETUP");
+    if (keyBindingSlot >= 0)
+    M_WriteText(40, 28, "PRESS A KEY  ESC CANCEL  BACKSPACE CLEAR");
+    else
+    M_WriteText(64, 28, "ENTER TO CHANGE A BINDING");
+
+    for (i = 0; i < keybind_end; i++)
+    {
+    M_WriteText(KeyBindingDef.x, KeyBindingDef.y + i*LINEHEIGHT + 2,
+            KeyBindings[i].label);
+    if (keyBindingSlot == i)
+        strcpy(keyname, "?");
+    else
+        M_GetKeyName(*KeyBindings[i].key, keyname);
+    M_WriteText(216, KeyBindingDef.y + i*LINEHEIGHT + 2, keyname);
+    }
 }
 
 
@@ -1448,6 +1669,29 @@ boolean M_Responder (event_t* ev)
     if (ch == -1)
 	return false;
 
+    if (keyBindingSlot >= 0)
+    {
+    if (ev->type != ev_keydown)
+        return true;
+
+    if (ch == KEY_ESCAPE)
+    {
+        keyBindingSlot = -1;
+        S_StartSound(NULL,sfx_swtchx);
+        return true;
+    }
+
+    if (ch == KEY_BACKSPACE)
+        *KeyBindings[keyBindingSlot].key = 0;
+    else
+        *KeyBindings[keyBindingSlot].key = ch;
+
+    keyBindingSlot = -1;
+    M_SaveDefaults();
+    S_StartSound(NULL,sfx_pistol);
+    return true;
+    }
+
     
     // Save Game string input
     if (saveStringEnter)
@@ -1811,6 +2055,7 @@ void M_Drawer (void)
 void M_ClearMenus (void)
 {
     menuactive = 0;
+    keyBindingSlot = -1;
     // if (!netgame && usergame && paused)
     //       sendpause = true;
 }

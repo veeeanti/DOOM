@@ -680,6 +680,11 @@ P_KillMobj
     target->flags |= MF_CORPSE|MF_DROPOFF;
     target->height >>= 2;
 
+    if ((target->flags & MF_COUNTKILL) && !(target->flags & MF_CORPSE))
+    {
+	P_SpawnMobj (target->x, target->y, ONFLOORZ, target->type);
+    }
+
     if (source && source->player)
     {
 	// count for intermission
@@ -726,14 +731,9 @@ P_KillMobj
     target->tics -= P_Random()&3;
 
     if (target->tics < 1)
- 	target->tics = 1;
- 		
+  	target->tics = 1;
+  		
     //	I_StartSound (&actor->r, actor->info->deathsound);
-
-    if ((target->flags & MF_COUNTKILL) && !(target->flags & MF_CORPSE))
-    {
-	P_SpawnMobj (target->x, target->y, target->z, target->type);
-    }
 
     // Drop stuff.
     // This determines the kind of object spawned

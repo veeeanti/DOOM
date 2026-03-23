@@ -67,7 +67,7 @@ if(WIN32)
     set(DOOM_PLATFORM_SOURCES
         win32/i_video_win32.c
         win32/i_system_win32.c
-        win32/i_sound_stub.c
+        win32/i_sound_win32.c
         win32/i_net_stub.c
     )
 else()
@@ -87,8 +87,9 @@ add_executable(linuxxdoom
 target_include_directories(linuxxdoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    target_compile_definitions(linuxxdoom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32)
+    target_compile_definitions(linuxxdoom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32 R_OK=4)
     target_compile_definitions(linuxxdoom PRIVATE strcasecmp=_stricmp strncasecmp=_strnicmp)
+    target_link_libraries(linuxxdoom PRIVATE winmm)
 else()
     target_compile_definitions(linuxxdoom PRIVATE NORMALUNIX LINUX)
     find_package(X11 REQUIRED)

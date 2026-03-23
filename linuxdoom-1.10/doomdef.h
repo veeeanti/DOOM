@@ -80,8 +80,9 @@ typedef enum
 // The integrated sound support is experimental,
 //  and unfinished. Default is synchronous.
 // Experimental asynchronous timer based is
-//  handled by SNDINTR. 
-#define SNDSERV  1
+//  handled by SNDINTR.
+// SNDSERV is disabled: we use an in-process waveOut backend (i_sound_win32.c).
+//#define SNDSERV  1
 //#define SNDINTR  1
 
 

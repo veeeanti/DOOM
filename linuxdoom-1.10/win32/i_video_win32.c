@@ -20,6 +20,11 @@ static unsigned int s_palette[256];
 static unsigned int s_pixels[SCREENWIDTH * SCREENHEIGHT];
 static int s_multiply = 2;
 static int s_initialized;
+static int s_grabmouse;
+static int s_rawinput;
+static int s_mousecaptured;
+static int s_cursorhidden;
+static int s_ignore_mousemove;
 
 static int translate_key(WPARAM vk)
 {
@@ -30,6 +35,7 @@ static int translate_key(WPARAM vk)
 
     switch (vk)
     {
+    case VK_SPACE: return ' ';
     case VK_LEFT: return KEY_LEFTARROW;
     case VK_RIGHT: return KEY_RIGHTARROW;
     case VK_UP: return KEY_UPARROW;
@@ -51,8 +57,33 @@ static int translate_key(WPARAM vk)
     case VK_F12: return KEY_F12;
     case VK_BACK: return KEY_BACKSPACE;
     case VK_PAUSE: return KEY_PAUSE;
+    case VK_NUMPAD0: return '0';
+    case VK_NUMPAD1: return '1';
+    case VK_NUMPAD2: return '2';
+    case VK_NUMPAD3: return '3';
+    case VK_NUMPAD4: return '4';
+    case VK_NUMPAD5: return '5';
+    case VK_NUMPAD6: return '6';
+    case VK_NUMPAD7: return '7';
+    case VK_NUMPAD8: return '8';
+    case VK_NUMPAD9: return '9';
+    case VK_MULTIPLY: return '*';
+    case VK_ADD: return '+';
+    case VK_SUBTRACT: return KEY_MINUS;
+    case VK_DECIMAL: return '.';
+    case VK_DIVIDE: return '/';
     case VK_OEM_PLUS: return KEY_EQUALS;
     case VK_OEM_MINUS: return KEY_MINUS;
+    case VK_OEM_1: return ';';
+    case VK_OEM_2: return '/';
+    case VK_OEM_3: return '`';
+    case VK_OEM_4: return '[';
+    case VK_OEM_5: return '\\';
+    case VK_OEM_6: return ']';
+    case VK_OEM_7: return '\'';
+    case VK_OEM_COMMA: return ',';
+    case VK_OEM_PERIOD: return '.';
+    case VK_OEM_102: return '\\';
     case VK_SHIFT: return KEY_RSHIFT;
     case VK_RSHIFT: return KEY_RSHIFT;
     case VK_LSHIFT: return KEY_RSHIFT;
@@ -94,6 +125,66 @@ static void post_mouse_event(int buttons, int dx, int dy)
     D_PostEvent(&event);
 }
 
+static void set_mouse_capture(HWND hwnd, int capture)
+{
+    if (!hwnd)
+        return;
+
+    if (capture)
+    {
+        RECT clip;
+        POINT center;
+
+        if (s_mousecaptured)
+            return;
+
+        SetCapture(hwnd);
+
+        if (!s_cursorhidden)
+        {
+            while (ShowCursor(FALSE) >= 0)
+                ;
+            s_cursorhidden = 1;
+        }
+
+        if (!s_rawinput)
+        {
+            GetClientRect(hwnd, &clip);
+            center.x = (clip.left + clip.right) / 2;
+            center.y = (clip.top + clip.bottom) / 2;
+
+            MapWindowPoints(hwnd, NULL, (POINT *)&clip, 2);
+            ClientToScreen(hwnd, &center);
+            ClipCursor(&clip);
+            SetCursorPos(center.x, center.y);
+            s_ignore_mousemove = 1;
+        }
+
+        s_mousecaptured = 1;
+    }
+    else
+    {
+        if (!s_mousecaptured)
+            return;
+
+        if (GetCapture() == hwnd)
+            ReleaseCapture();
+
+        if (!s_rawinput)
+            ClipCursor(NULL);
+
+        if (s_cursorhidden)
+        {
+            while (ShowCursor(TRUE) < 0)
+                ;
+            s_cursorhidden = 0;
+        }
+
+        s_mousecaptured = 0;
+        s_ignore_mousemove = 0;
+    }
+}
+
 static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     static int last_x;
@@ -106,6 +197,55 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     case WM_CLOSE:
         I_Quit();
         return 0;
+
+    case WM_SETFOCUS:
+        if (s_grabmouse)
+            set_mouse_capture(hwnd, 1);
+        return 0;
+
+    case WM_KILLFOCUS:
+        set_mouse_capture(hwnd, 0);
+        return 0;
+
+    case WM_ACTIVATE:
+        if (LOWORD(wparam) == WA_INACTIVE)
+            set_mouse_capture(hwnd, 0);
+        else if (s_grabmouse)
+            set_mouse_capture(hwnd, 1);
+        return 0;
+
+    case WM_SETCURSOR:
+        if (s_mousecaptured)
+        {
+            SetCursor(NULL);
+            return TRUE;
+        }
+        break;
+
+    case WM_INPUT:
+        if (s_mousecaptured && s_rawinput)
+        {
+            UINT size = sizeof(RAWINPUT);
+            RAWINPUT raw;
+
+            if (GetRawInputData((HRAWINPUT)lparam,
+                                RID_INPUT,
+                                &raw,
+                                &size,
+                                sizeof(RAWINPUTHEADER)) == (UINT)-1)
+                return 0;
+
+            if (raw.header.dwType == RIM_TYPEMOUSE)
+            {
+                int dx = (int)raw.data.mouse.lLastX;
+                int dy = (int)raw.data.mouse.lLastY;
+
+                if (dx || dy)
+                    post_mouse_event(current_mouse_buttons(), dx << 2, -dy << 2);
+            }
+            return 0;
+        }
+        break;
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
@@ -136,6 +276,40 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
     case WM_MOUSEMOVE:
     {
+        if (s_mousecaptured && s_rawinput)
+            return 0;
+
+        if (s_ignore_mousemove)
+        {
+            s_ignore_mousemove = 0;
+            return 0;
+        }
+
+        if (s_mousecaptured)
+        {
+            RECT rc;
+            POINT center;
+            int x = GET_X_LPARAM(lparam);
+            int y = GET_Y_LPARAM(lparam);
+            int dx;
+            int dy;
+
+            GetClientRect(hwnd, &rc);
+            center.x = (rc.left + rc.right) / 2;
+            center.y = (rc.top + rc.bottom) / 2;
+
+            dx = x - center.x;
+            dy = y - center.y;
+
+            if (dx || dy)
+                post_mouse_event(current_mouse_buttons(), dx << 2, -dy << 2);
+
+            ClientToScreen(hwnd, &center);
+            SetCursorPos(center.x, center.y);
+            s_ignore_mousemove = 1;
+            return 0;
+        }
+
         int x = GET_X_LPARAM(lparam);
         int y = GET_Y_LPARAM(lparam);
         int dx = x - last_x;
@@ -148,10 +322,20 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     }
 
     case WM_LBUTTONDOWN:
-    case WM_LBUTTONUP:
+        if (s_grabmouse)
+            set_mouse_capture(hwnd, 1);
+        post_mouse_event(current_mouse_buttons(), 0, 0);
+        return 0;
+
     case WM_MBUTTONDOWN:
-    case WM_MBUTTONUP:
     case WM_RBUTTONDOWN:
+        if (s_grabmouse)
+            set_mouse_capture(hwnd, 1);
+        post_mouse_event(current_mouse_buttons(), 0, 0);
+        return 0;
+
+    case WM_LBUTTONUP:
+    case WM_MBUTTONUP:
     case WM_RBUTTONUP:
         post_mouse_event(current_mouse_buttons(), 0, 0);
         return 0;
@@ -245,12 +429,14 @@ void I_SetPalette(byte *palette)
         int r = gammatable[usegamma][*palette++];
         int g = gammatable[usegamma][*palette++];
         int b = gammatable[usegamma][*palette++];
-        s_palette[i] = ((unsigned int)b << 16) | ((unsigned int)g << 8) | (unsigned int)r;
+        s_palette[i] = ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
     }
 }
 
 void I_ShutdownGraphics(void)
 {
+    set_mouse_capture(s_hwnd, 0);
+
     if (s_hdc)
     {
         ReleaseDC(s_hwnd, s_hdc);
@@ -335,13 +521,20 @@ void I_InitGraphics(void)
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;
 
-    if (M_CheckParm("-grabmouse"))
     {
-        RECT clip;
-        GetClientRect(s_hwnd, &clip);
-        MapWindowPoints(s_hwnd, NULL, (POINT *)&clip, 2);
-        ClipCursor(&clip);
+        RAWINPUTDEVICE raw_device;
+
+        raw_device.usUsagePage = 0x01;
+        raw_device.usUsage = 0x02;
+        raw_device.dwFlags = 0;
+        raw_device.hwndTarget = s_hwnd;
+        s_rawinput = RegisterRawInputDevices(&raw_device, 1, sizeof(raw_device)) ? 1 : 0;
     }
+
+    s_grabmouse = !M_CheckParm("-nograbmouse") || M_CheckParm("-grabmouse");
+
+    if (s_grabmouse)
+        set_mouse_capture(s_hwnd, 1);
 
     s_initialized = 1;
 }
