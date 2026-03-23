@@ -94,6 +94,7 @@ void I_InitMusic(void);
 void I_ShutdownMusic(void);
 // Volume.
 void I_SetMusicVolume(int volume);
+void I_SetMusicLump(const char *name, int lumpnum);
 // PAUSE game handling.
 void I_PauseSong(int handle);
 void I_ResumeSong(int handle);

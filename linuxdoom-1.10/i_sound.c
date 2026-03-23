@@ -443,6 +443,12 @@ void I_SetMusicVolume(int volume)
   // Whatever( snd_MusciVolume );
 }
 
+void I_SetMusicLump(const char *name, int lumpnum)
+{
+  name = NULL;
+  lumpnum = 0;
+}
+
 
 //
 // Retrieve the raw data lump index

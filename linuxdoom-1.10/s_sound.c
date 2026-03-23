@@ -675,6 +675,8 @@ S_ChangeMusic
 	music->lumpnum = W_GetNumForName(namebuf);
     }
 
+    I_SetMusicLump(music->name, music->lumpnum);
+
     // load & register it
     music->data = (void *) W_CacheLumpNum(music->lumpnum, PU_MUSIC);
     music->handle = I_RegisterSong(music->data);

@@ -22,6 +22,9 @@
 #define BUFFER_SAMPLES (SAMPLECOUNT * 2)
 #define MIXBUFFER_BYTES (SAMPLECOUNT * 4)
 #define WAVE_BUFFER_COUNT 4
+#define MAX_REGISTERED_SONGS 8
+#define MIDI_DIVISION 70
+#define MUSIC_ALIAS "doommusic"
 
 static int lengths[NUMSFX];
 static signed short mixbuffer[BUFFER_SAMPLES];
@@ -46,10 +49,736 @@ static int s_waveprepared[WAVE_BUFFER_COUNT];
 static int s_nextbuffer;
 static int s_soundready;
 
+typedef enum
+{
+    SONG_TYPE_NONE,
+    SONG_TYPE_MIDI,
+    SONG_TYPE_DIGITAL
+} songtype_t;
+
+typedef struct
+{
+    int in_use;
+    int temporary;
+    songtype_t type;
+    char path[MAX_PATH];
+} songslot_t;
+
+typedef struct
+{
+    unsigned char *data;
+    size_t size;
+    size_t capacity;
+} bytebuffer_t;
+
+static songslot_t s_songslots[MAX_REGISTERED_SONGS];
+static int s_playing_song;
+static int s_musicpaused;
+static char s_music_name[16];
+static int s_music_lumpnum = -1;
+static int s_music_lumplength;
+static char s_music_error[128] = "unknown music error";
+
 #ifdef SNDSERV
 FILE *sndserver = NULL;
 char *sndserver_filename = "sndserver";
 #endif
+
+static unsigned short read_u16le(const unsigned char *data)
+{
+    return (unsigned short)(data[0] | (data[1] << 8));
+}
+
+static void set_music_error(const char *message)
+{
+    if (!message)
+        message = "unknown music error";
+
+    strncpy(s_music_error, message, sizeof(s_music_error) - 1);
+    s_music_error[sizeof(s_music_error) - 1] = '\0';
+}
+
+static void copy_string(char *dest, size_t dest_size, const char *src)
+{
+    if (!dest || !dest_size)
+        return;
+
+    if (!src)
+    {
+        dest[0] = '\0';
+        return;
+    }
+
+    strncpy(dest, src, dest_size - 1);
+    dest[dest_size - 1] = '\0';
+}
+
+static int file_exists(const char *path)
+{
+    DWORD attributes;
+
+    attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES
+        && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static void path_remove_filename(char *path)
+{
+    char *slash;
+    char *alt;
+
+    slash = strrchr(path, '\\');
+    alt = strrchr(path, '/');
+    if (alt && (!slash || alt > slash))
+        slash = alt;
+
+    if (slash)
+        *slash = '\0';
+    else
+        copy_string(path, MAX_PATH, ".");
+}
+
+static void path_join(char *out, size_t out_size, const char *dir, const char *name)
+{
+    size_t dir_len;
+
+    if (!dir || !dir[0])
+    {
+        snprintf(out, out_size, "%s", name);
+        return;
+    }
+
+    dir_len = strlen(dir);
+    if (dir[dir_len - 1] == '\\' || dir[dir_len - 1] == '/')
+        snprintf(out, out_size, "%s%s", dir, name);
+    else
+        snprintf(out, out_size, "%s\\%s", dir, name);
+}
+
+static int same_path(const char *left, const char *right)
+{
+    return _stricmp(left, right) == 0;
+}
+
+static int buffer_reserve(bytebuffer_t *buffer, size_t extra)
+{
+    unsigned char *grown;
+    size_t needed;
+    size_t capacity;
+
+    needed = buffer->size + extra;
+    if (needed <= buffer->capacity)
+        return 1;
+
+    capacity = buffer->capacity ? buffer->capacity : 1024;
+    while (capacity < needed)
+        capacity *= 2;
+
+    grown = (unsigned char *)realloc(buffer->data, capacity);
+    if (!grown)
+        return 0;
+
+    buffer->data = grown;
+    buffer->capacity = capacity;
+    return 1;
+}
+
+static int buffer_write_byte(bytebuffer_t *buffer, unsigned char value)
+{
+    if (!buffer_reserve(buffer, 1))
+        return 0;
+
+    buffer->data[buffer->size++] = value;
+    return 1;
+}
+
+static int buffer_write_bytes(bytebuffer_t *buffer, const void *data, size_t length)
+{
+    if (!buffer_reserve(buffer, length))
+        return 0;
+
+    memcpy(buffer->data + buffer->size, data, length);
+    buffer->size += length;
+    return 1;
+}
+
+static int buffer_write_u16be(bytebuffer_t *buffer, unsigned short value)
+{
+    return buffer_write_byte(buffer, (unsigned char)((value >> 8) & 0xff))
+        && buffer_write_byte(buffer, (unsigned char)(value & 0xff));
+}
+
+static int buffer_write_u32be(bytebuffer_t *buffer, unsigned int value)
+{
+    return buffer_write_byte(buffer, (unsigned char)((value >> 24) & 0xff))
+        && buffer_write_byte(buffer, (unsigned char)((value >> 16) & 0xff))
+        && buffer_write_byte(buffer, (unsigned char)((value >> 8) & 0xff))
+        && buffer_write_byte(buffer, (unsigned char)(value & 0xff));
+}
+
+static int buffer_write_vlq(bytebuffer_t *buffer, unsigned int value)
+{
+    unsigned char scratch[5];
+    int count;
+
+    count = 0;
+    scratch[count++] = (unsigned char)(value & 0x7f);
+    value >>= 7;
+
+    while (value)
+    {
+        scratch[count++] = (unsigned char)((value & 0x7f) | 0x80);
+        value >>= 7;
+    }
+
+    while (count--)
+        if (!buffer_write_byte(buffer, scratch[count]))
+            return 0;
+
+    return 1;
+}
+
+static int write_midi_event3(bytebuffer_t *track, unsigned int delta, unsigned char status,
+    unsigned char data1, unsigned char data2)
+{
+    return buffer_write_vlq(track, delta)
+        && buffer_write_byte(track, status)
+        && buffer_write_byte(track, data1)
+        && buffer_write_byte(track, data2);
+}
+
+static int write_midi_event2(bytebuffer_t *track, unsigned int delta, unsigned char status,
+    unsigned char data1)
+{
+    return buffer_write_vlq(track, delta)
+        && buffer_write_byte(track, status)
+        && buffer_write_byte(track, data1);
+}
+
+static int map_mus_channel(int mus_channel, int channel_map[16], int *next_channel)
+{
+    if (mus_channel == 15)
+        return 9;
+
+    if (channel_map[mus_channel] >= 0)
+        return channel_map[mus_channel];
+
+    while (*next_channel == 9)
+        (*next_channel)++;
+
+    channel_map[mus_channel] = *next_channel;
+    (*next_channel)++;
+    return channel_map[mus_channel];
+}
+
+static int mus_to_midi(const unsigned char *musdata, int muslen, bytebuffer_t *midi)
+{
+    static const unsigned char controller_map[] =
+    {
+        0x00, 0x20, 0x01, 0x07, 0x0a,
+        0x0b, 0x5b, 0x5d, 0x40, 0x43,
+        0x78, 0x7b, 0x7e, 0x7f, 0x79
+    };
+    bytebuffer_t track;
+    unsigned int queued_delta;
+    int channel_map[16];
+    unsigned char last_volume[16];
+    unsigned short score_len;
+    unsigned short score_start;
+    unsigned int score_end;
+    int next_channel;
+    int pos;
+    int i;
+
+    memset(&track, 0, sizeof(track));
+    set_music_error("invalid MUS data");
+
+    if (!musdata || muslen < 16 || memcmp(musdata, "MUS\x1a", 4) != 0)
+        return 0;
+
+    score_len = read_u16le(musdata + 4);
+    score_start = read_u16le(musdata + 6);
+    score_end = score_start + score_len;
+    if (score_start >= (unsigned int)muslen || score_end > (unsigned int)muslen)
+    {
+        set_music_error("MUS header has an invalid score range");
+        return 0;
+    }
+
+    for (i = 0; i < 16; i++)
+    {
+        channel_map[i] = -1;
+        last_volume[i] = 64;
+    }
+
+    next_channel = 0;
+    queued_delta = 0;
+    pos = score_start;
+
+    if (!buffer_write_vlq(&track, 0)
+        || !buffer_write_byte(&track, 0xff)
+        || !buffer_write_byte(&track, 0x51)
+        || !buffer_write_byte(&track, 0x03)
+        || !buffer_write_byte(&track, 0x07)
+        || !buffer_write_byte(&track, 0xa1)
+        || !buffer_write_byte(&track, 0x20))
+    {
+        set_music_error("out of memory while writing MIDI tempo event");
+        goto fail;
+    }
+
+    while (pos < (int)score_end)
+    {
+        unsigned char descriptor;
+        int mus_channel;
+        int midi_channel;
+        int event_type;
+
+        descriptor = musdata[pos++];
+        mus_channel = descriptor & 0x0f;
+        event_type = (descriptor >> 4) & 0x07;
+        midi_channel = map_mus_channel(mus_channel, channel_map, &next_channel);
+
+        switch (event_type)
+        {
+        case 0:
+        {
+            unsigned char note;
+
+            if (pos >= (int)score_end)
+            {
+                set_music_error("truncated MUS release-note event");
+                goto fail;
+            }
+
+            note = (unsigned char)(musdata[pos++] & 0x7f);
+            if (!write_midi_event3(&track, queued_delta, (unsigned char)(0x90 | midi_channel), note, 0))
+            {
+                set_music_error("out of memory while writing MIDI release-note event");
+                goto fail;
+            }
+            queued_delta = 0;
+            break;
+        }
+        case 1:
+        {
+            unsigned char note;
+
+            if (pos >= (int)score_end)
+            {
+                set_music_error("truncated MUS play-note event");
+                goto fail;
+            }
+
+            note = musdata[pos++];
+            if (note & 0x80)
+            {
+                if (pos >= (int)score_end)
+                {
+                    set_music_error("truncated MUS note volume event");
+                    goto fail;
+                }
+                last_volume[mus_channel] = musdata[pos++];
+            }
+
+            note &= 0x7f;
+            if (!write_midi_event3(&track, queued_delta, (unsigned char)(0x90 | midi_channel),
+                note, last_volume[mus_channel]))
+            {
+                set_music_error("out of memory while writing MIDI note-on event");
+                goto fail;
+            }
+            queued_delta = 0;
+            break;
+        }
+        case 2:
+        {
+            unsigned short bend;
+            unsigned char wheel;
+
+            if (pos >= (int)score_end)
+            {
+                set_music_error("truncated MUS pitch event");
+                goto fail;
+            }
+
+            wheel = musdata[pos++];
+            bend = (unsigned short)(wheel << 6);
+            if (!write_midi_event3(&track, queued_delta, (unsigned char)(0xe0 | midi_channel),
+                (unsigned char)(bend & 0x7f),
+                (unsigned char)((bend >> 7) & 0x7f)))
+            {
+                set_music_error("out of memory while writing MIDI pitch-wheel event");
+                goto fail;
+            }
+            queued_delta = 0;
+            break;
+        }
+        case 3:
+        {
+            unsigned char controller;
+
+            if (pos >= (int)score_end)
+            {
+                set_music_error("truncated MUS system event");
+                goto fail;
+            }
+
+            controller = musdata[pos++];
+            if (controller < 10 || controller > 14)
+                break;
+
+            if (!write_midi_event3(&track, queued_delta, (unsigned char)(0xb0 | midi_channel),
+                controller_map[controller], 0))
+            {
+                set_music_error("out of memory while writing MIDI controller event");
+                goto fail;
+            }
+            queued_delta = 0;
+            break;
+        }
+        case 4:
+        {
+            unsigned char controller;
+            unsigned char value;
+
+            if (pos + 1 >= (int)score_end)
+            {
+                set_music_error("truncated MUS controller-change event");
+                goto fail;
+            }
+
+            controller = musdata[pos++];
+            value = musdata[pos++];
+
+            if (!controller)
+            {
+                if (!write_midi_event2(&track, queued_delta, (unsigned char)(0xc0 | midi_channel), value))
+                {
+                    set_music_error("out of memory while writing MIDI program-change event");
+                    goto fail;
+                }
+            }
+            else
+            {
+                if (controller > 9)
+                    break;
+                if (!write_midi_event3(&track, queued_delta, (unsigned char)(0xb0 | midi_channel),
+                    controller_map[controller], value))
+                {
+                    set_music_error("out of memory while writing MIDI control-change event");
+                    goto fail;
+                }
+            }
+
+            queued_delta = 0;
+            break;
+        }
+        case 5:
+            break;
+        case 6:
+            pos = score_end;
+            break;
+        case 7:
+            if (pos >= (int)score_end)
+            {
+                set_music_error("truncated unused MUS event");
+                goto fail;
+            }
+            pos++;
+            break;
+        default:
+            set_music_error("unsupported MUS event type");
+            goto fail;
+        }
+
+        if (descriptor & 0x80)
+        {
+            unsigned int delay;
+            unsigned char time_byte;
+
+            delay = 0;
+            do
+            {
+                if (pos >= (int)score_end)
+                {
+                    set_music_error("truncated MUS time delay");
+                    goto fail;
+                }
+
+                time_byte = musdata[pos++];
+                delay = (delay << 7) | (time_byte & 0x7f);
+            } while (time_byte & 0x80);
+
+            queued_delta += delay;
+        }
+    }
+
+    if (!buffer_write_vlq(&track, queued_delta)
+        || !buffer_write_byte(&track, 0xff)
+        || !buffer_write_byte(&track, 0x2f)
+        || !buffer_write_byte(&track, 0x00))
+    {
+        set_music_error("out of memory while writing MIDI track end");
+        goto fail;
+    }
+
+    if (!buffer_write_bytes(midi, "MThd", 4)
+        || !buffer_write_u32be(midi, 6)
+        || !buffer_write_u16be(midi, 0)
+        || !buffer_write_u16be(midi, 1)
+        || !buffer_write_u16be(midi, MIDI_DIVISION)
+        || !buffer_write_bytes(midi, "MTrk", 4)
+        || !buffer_write_u32be(midi, (unsigned int)track.size)
+        || !buffer_write_bytes(midi, track.data, track.size))
+    {
+        set_music_error("out of memory while assembling MIDI file");
+        goto fail;
+    }
+
+    free(track.data);
+    return 1;
+
+fail:
+    free(track.data);
+    return 0;
+}
+
+static int write_file(const char *path, const unsigned char *data, size_t size)
+{
+    FILE *stream;
+
+    stream = fopen(path, "wb");
+    if (!stream)
+        return 0;
+
+    if (fwrite(data, 1, size, stream) != size)
+    {
+        fclose(stream);
+        remove(path);
+        return 0;
+    }
+
+    fclose(stream);
+    return 1;
+}
+
+static int create_temp_midi_path(char *path, size_t path_size)
+{
+    char temp_dir[MAX_PATH];
+    char temp_file[MAX_PATH];
+
+    if (!GetTempPathA(MAX_PATH, temp_dir))
+        return 0;
+
+    if (!GetTempFileNameA(temp_dir, "dmu", 0, temp_file))
+        return 0;
+
+    remove(temp_file);
+    snprintf(path, path_size, "%s.mid", temp_file);
+    return 1;
+}
+
+static int create_temp_midi_file(const unsigned char *musdata, int muslen, char *out_path, size_t out_path_size)
+{
+    bytebuffer_t midi;
+    int success;
+
+    memset(&midi, 0, sizeof(midi));
+
+    if (!create_temp_midi_path(out_path, out_path_size))
+    {
+        set_music_error("failed to create a temporary MIDI path");
+        return 0;
+    }
+
+    if (!mus_to_midi(musdata, muslen, &midi))
+    {
+        free(midi.data);
+        return 0;
+    }
+
+    success = write_file(out_path, midi.data, midi.size);
+    free(midi.data);
+    if (!success)
+        set_music_error("failed to write temporary MIDI file");
+    return success;
+}
+
+static void report_mci_error(const char *context, MCIERROR error)
+{
+    char message[256];
+
+    if (!error)
+        return;
+
+    if (!mciGetErrorStringA(error, message, sizeof(message)))
+        strcpy(message, "unknown MCI error");
+
+    fprintf(stderr, "%s: %s\n", context, message);
+}
+
+static void close_current_music(void)
+{
+    mciSendStringA("stop " MUSIC_ALIAS, NULL, 0, NULL);
+    mciSendStringA("close " MUSIC_ALIAS, NULL, 0, NULL);
+    s_playing_song = 0;
+    s_musicpaused = 0;
+}
+
+static void apply_music_volume(void)
+{
+    unsigned int volume16;
+    DWORD packed_volume;
+    char command[128];
+
+    if (snd_MusicVolume < 0)
+        snd_MusicVolume = 0;
+    else if (snd_MusicVolume > 15)
+        snd_MusicVolume = 15;
+
+    volume16 = (unsigned int)((snd_MusicVolume * 0xffffu) / 15u);
+    packed_volume = volume16 | (volume16 << 16);
+    midiOutSetVolume((HMIDIOUT)(DWORD_PTR)MIDI_MAPPER, packed_volume);
+
+    if (!s_playing_song)
+        return;
+
+    snprintf(command, sizeof(command), "setaudio %s volume to %d", MUSIC_ALIAS,
+        (snd_MusicVolume * 1000) / 15);
+    mciSendStringA(command, NULL, 0, NULL);
+}
+
+static int open_music_alias(const songslot_t *slot)
+{
+    MCIERROR error;
+    char command[MAX_PATH * 2 + 64];
+
+    close_current_music();
+
+    if (slot->type == SONG_TYPE_MIDI)
+    {
+        snprintf(command, sizeof(command), "open \"%s\" type sequencer alias %s",
+            slot->path, MUSIC_ALIAS);
+        error = mciSendStringA(command, NULL, 0, NULL);
+        if (error)
+        {
+            report_mci_error("I_PlaySong: MIDI open failed", error);
+            return 0;
+        }
+    }
+    else
+    {
+        snprintf(command, sizeof(command), "open \"%s\" alias %s", slot->path, MUSIC_ALIAS);
+        error = mciSendStringA(command, NULL, 0, NULL);
+        if (error)
+        {
+            snprintf(command, sizeof(command), "open \"%s\" type mpegvideo alias %s",
+                slot->path, MUSIC_ALIAS);
+            error = mciSendStringA(command, NULL, 0, NULL);
+            if (error)
+            {
+                report_mci_error("I_PlaySong: digital music open failed", error);
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int allocate_song_slot(void)
+{
+    int i;
+
+    for (i = 0; i < MAX_REGISTERED_SONGS; i++)
+        if (!s_songslots[i].in_use)
+            return i;
+
+    return -1;
+}
+
+static int external_music_candidate(const char *dir, const char *stem, char *out_path, size_t out_path_size)
+{
+    static const char *extensions[] = { ".ogg", ".mp3", ".mid", ".midi" };
+    char candidate[MAX_PATH];
+    int i;
+
+    for (i = 0; i < (int)(sizeof(extensions) / sizeof(extensions[0])); i++)
+    {
+        snprintf(candidate, sizeof(candidate), "%s%s", stem, extensions[i]);
+        path_join(out_path, out_path_size, dir, candidate);
+        if (file_exists(out_path))
+            return 1;
+    }
+
+    return 0;
+}
+
+static int find_external_music_file(char *out_path, size_t out_path_size, songtype_t *type)
+{
+    char exe_dir[MAX_PATH];
+    char search_dirs[6][MAX_PATH];
+    char prefixed[24];
+    int dir_count;
+    int i;
+
+    if (!s_music_name[0])
+        return 0;
+
+    if (!GetModuleFileNameA(NULL, exe_dir, MAX_PATH))
+        copy_string(exe_dir, sizeof(exe_dir), ".");
+
+    path_remove_filename(exe_dir);
+
+    dir_count = 0;
+    copy_string(search_dirs[dir_count++], MAX_PATH, exe_dir);
+    copy_string(search_dirs[dir_count], MAX_PATH, exe_dir);
+    path_remove_filename(search_dirs[dir_count++]);
+    copy_string(search_dirs[dir_count], MAX_PATH, search_dirs[dir_count - 1]);
+    path_remove_filename(search_dirs[dir_count++]);
+    copy_string(search_dirs[dir_count++], MAX_PATH, ".");
+
+    snprintf(prefixed, sizeof(prefixed), "d_%s", s_music_name);
+
+    for (i = 0; i < dir_count; i++)
+    {
+        char music_dir[MAX_PATH];
+
+        if (external_music_candidate(search_dirs[i], s_music_name, out_path, out_path_size)
+            || external_music_candidate(search_dirs[i], prefixed, out_path, out_path_size))
+            goto found;
+
+        path_join(music_dir, sizeof(music_dir), search_dirs[i], "music");
+        if (external_music_candidate(music_dir, s_music_name, out_path, out_path_size)
+            || external_music_candidate(music_dir, prefixed, out_path, out_path_size))
+            goto found;
+    }
+
+    return 0;
+
+found:
+    if (_stricmp(strrchr(out_path, '.'), ".mid") == 0
+        || _stricmp(strrchr(out_path, '.'), ".midi") == 0)
+        *type = SONG_TYPE_MIDI;
+    else
+        *type = SONG_TYPE_DIGITAL;
+    return 1;
+}
+
+static void release_song_slot(int index)
+{
+    if (index < 0 || index >= MAX_REGISTERED_SONGS || !s_songslots[index].in_use)
+        return;
+
+    if (s_playing_song == index + 1)
+        close_current_music();
+
+    if (s_songslots[index].temporary && s_songslots[index].path[0])
+        remove(s_songslots[index].path);
+
+    memset(&s_songslots[index], 0, sizeof(s_songslots[index]));
+}
 
 static void *getsfx(char *sfxname, int *len)
 {
@@ -466,44 +1195,156 @@ void I_InitSound(void)
 
 void I_InitMusic(void)
 {
+    memset(s_songslots, 0, sizeof(s_songslots));
+    s_playing_song = 0;
+    s_musicpaused = 0;
+    s_music_name[0] = '\0';
+    s_music_lumpnum = -1;
+    s_music_lumplength = 0;
 }
 
 void I_ShutdownMusic(void)
 {
+    int i;
+
+    close_current_music();
+    for (i = 0; i < MAX_REGISTERED_SONGS; i++)
+        release_song_slot(i);
 }
 
 void I_SetMusicVolume(int volume)
 {
     snd_MusicVolume = volume;
+    apply_music_volume();
+}
+
+void I_SetMusicLump(const char *name, int lumpnum)
+{
+    copy_string(s_music_name, sizeof(s_music_name), name);
+    s_music_lumpnum = lumpnum;
+    s_music_lumplength = lumpnum >= 0 ? W_LumpLength(lumpnum) : 0;
 }
 
 void I_PauseSong(int handle)
 {
-    handle = 0;
+    MCIERROR error;
+
+    handle = handle;
+    if (!s_playing_song || s_musicpaused)
+        return;
+
+    error = mciSendStringA("pause " MUSIC_ALIAS, NULL, 0, NULL);
+    if (!error)
+        s_musicpaused = 1;
 }
 
 void I_ResumeSong(int handle)
 {
-    handle = 0;
+    MCIERROR error;
+
+    handle = handle;
+    if (!s_playing_song || !s_musicpaused)
+        return;
+
+    error = mciSendStringA("resume " MUSIC_ALIAS, NULL, 0, NULL);
+    if (!error)
+        s_musicpaused = 0;
 }
 
 int I_RegisterSong(void *data)
 {
-    data = NULL;
-    return 1;
+    int slot;
+    songtype_t type;
+
+    slot = allocate_song_slot();
+    if (slot < 0)
+    {
+        fprintf(stderr, "I_RegisterSong: no free song slots\n");
+        return 0;
+    }
+
+    memset(&s_songslots[slot], 0, sizeof(s_songslots[slot]));
+    s_songslots[slot].in_use = 1;
+
+    if (find_external_music_file(s_songslots[slot].path, sizeof(s_songslots[slot].path), &type))
+    {
+        s_songslots[slot].type = type;
+        fprintf(stderr, "I_RegisterSong: using external music %s\n", s_songslots[slot].path);
+        return slot + 1;
+    }
+
+    if (!data || s_music_lumplength <= 0)
+    {
+        release_song_slot(slot);
+        fprintf(stderr, "I_RegisterSong: missing music lump data for %s\n", s_music_name);
+        return 0;
+    }
+
+    if (!create_temp_midi_file((const unsigned char *)data, s_music_lumplength,
+        s_songslots[slot].path, sizeof(s_songslots[slot].path)))
+    {
+        release_song_slot(slot);
+        fprintf(stderr, "I_RegisterSong: failed to convert MUS %s to MIDI (%s)\n",
+            s_music_name, s_music_error);
+        return 0;
+    }
+
+    s_songslots[slot].temporary = 1;
+    s_songslots[slot].type = SONG_TYPE_MIDI;
+    fprintf(stderr, "I_RegisterSong: converted %s to temporary MIDI\n", s_music_name);
+    return slot + 1;
 }
 
 void I_PlaySong(int handle, int looping)
 {
-    handle = looping = 0;
+    MCIERROR error;
+    char command[64];
+    int slot_index;
+
+    slot_index = handle - 1;
+    if (slot_index < 0 || slot_index >= MAX_REGISTERED_SONGS || !s_songslots[slot_index].in_use)
+        return;
+
+    if (!open_music_alias(&s_songslots[slot_index]))
+        return;
+
+    apply_music_volume();
+
+    if (looping)
+    {
+        snprintf(command, sizeof(command), "play %s from 0 repeat", MUSIC_ALIAS);
+        error = mciSendStringA(command, NULL, 0, NULL);
+        if (error)
+        {
+            snprintf(command, sizeof(command), "play %s from 0", MUSIC_ALIAS);
+            error = mciSendStringA(command, NULL, 0, NULL);
+        }
+    }
+    else
+    {
+        snprintf(command, sizeof(command), "play %s from 0", MUSIC_ALIAS);
+        error = mciSendStringA(command, NULL, 0, NULL);
+    }
+
+    if (error)
+    {
+        report_mci_error("I_PlaySong: play failed", error);
+        close_current_music();
+        return;
+    }
+
+    s_playing_song = handle;
+    s_musicpaused = 0;
 }
 
 void I_StopSong(int handle)
 {
-    handle = 0;
+    if (handle == s_playing_song)
+        close_current_music();
 }
 
 void I_UnRegisterSong(int handle)
 {
+    release_song_slot(handle - 1);
     handle = 0;
 }
