@@ -53,6 +53,9 @@ void I_ReadScreen (byte* scr);
 void I_BeginRead (void);
 void I_EndRead (void);
 
+void I_ToggleFullscreen(void);
+int I_IsFullscreen(void);
+
 
 
 #endif

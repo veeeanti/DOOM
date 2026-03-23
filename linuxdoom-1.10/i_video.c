@@ -186,6 +186,15 @@ void I_StartFrame (void)
 
 }
 
+void I_ToggleFullscreen(void)
+{
+}
+
+int I_IsFullscreen(void)
+{
+	return 0;
+}
+
 static int	lastmousex = 0;
 static int	lastmousey = 0;
 boolean		mousemoved = false;

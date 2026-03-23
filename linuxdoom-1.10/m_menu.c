@@ -200,8 +200,11 @@ void M_ChangeDetail(int choice);
 void M_SizeDisplay(int choice);
 void M_StartGame(int choice);
 void M_Sound(int choice);
+void M_Config(int choice);
 void M_Keyboard(int choice);
 void M_BindKey(int choice);
+void M_ToggleMouseVertical(int choice);
+void M_ToggleFullscreenOption(int choice);
 
 void M_FinishReadThis(int choice);
 void M_LoadSelect(int choice);
@@ -216,6 +219,7 @@ void M_DrawReadThis2(void);
 void M_DrawNewGame(void);
 void M_DrawEpisode(void);
 void M_DrawOptions(void);
+void M_DrawConfig(void);
 void M_DrawKeyboard(void);
 void M_DrawSound(void);
 void M_DrawLoad(void);
@@ -244,6 +248,7 @@ extern int		key_fire;
 extern int		key_use;
 extern int		key_strafe;
 extern int		key_speed;
+extern int		mouseVertical;
 
 
 
@@ -273,7 +278,7 @@ menuitem_t MainMenu[]=
     {1,"M_QUITG",M_QuitDOOM,'q'}
 };
 
-menu_t  MainDef =
+menu_t MainDef =
 {
     main_end,
     NULL,
@@ -357,25 +362,23 @@ enum
     messages,
     detail,
     scrnsize,
-    option_empty1,
     mousesens,
-    keybinds,
-    option_empty2,
+    configs,
+    option_empty1,
     soundvol,
     opt_end
 } options_e;
 
 menuitem_t OptionsMenu[]=
 {
-    {1,"M_ENDGAM",	M_EndGame,'e'},
-    {1,"M_MESSG",	M_ChangeMessages,'m'},
-    {1,"M_DETAIL",	M_ChangeDetail,'g'},
-    {2,"M_SCRNSZ",	M_SizeDisplay,'s'},
+    {1,"M_ENDGAM", M_EndGame,'e'},
+    {1,"M_MESSG", M_ChangeMessages,'m'},
+    {2,"M_DETAIL", M_ChangeDetail,'g'},
+    {2,"M_SCRNSZ", M_SizeDisplay,'s'},
+    {2,"M_MSENS", M_ChangeSensitivity,'m'},
+    {1,"", M_Config,'c'},
     {-1,"",0},
-    {2,"M_MSENS",	M_ChangeSensitivity,'m'},
-    {1,"", 		M_Keyboard,'k'},
-    {-1,"",0},
-    {1,"M_SVOL",	M_Sound,'s'}
+    {1,"M_SVOL", M_Sound,'s'}
 };
 
 menu_t  OptionsDef =
@@ -384,6 +387,31 @@ menu_t  OptionsDef =
     &MainDef,
     OptionsMenu,
     M_DrawOptions,
+    60,37,
+    0
+};
+
+enum
+{
+    cfg_mousevert,
+    cfg_fullscreen,
+    cfg_keybinds,
+    config_end
+} config_e;
+
+menuitem_t ConfigMenu[] =
+{
+    {1,"", M_ToggleMouseVertical, 'v'},
+    {1,"", M_ToggleFullscreenOption, 'f'},
+    {1,"", M_Keyboard, 'k'}
+};
+
+menu_t ConfigDef =
+{
+    config_end,
+    &OptionsDef,
+    ConfigMenu,
+    M_DrawConfig,
     60,37,
     0
 };
@@ -440,7 +468,7 @@ menuitem_t KeyBindingMenu[] =
 menu_t  KeyBindingDef =
 {
     keybind_end,
-    &OptionsDef,
+    &ConfigDef,
     KeyBindingMenu,
     M_DrawKeyboard,
     48,30,
@@ -1030,26 +1058,50 @@ char	msgNames[2][9]		= {"M_MSGOFF","M_MSGON"};
 void M_DrawOptions(void)
 {
     V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
-	
-    V_DrawPatchDirect (OptionsDef.x + 175,OptionsDef.y+LINEHEIGHT*detail,0,
-		       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
 
     V_DrawPatchDirect (OptionsDef.x + 120,OptionsDef.y+LINEHEIGHT*messages,0,
 		       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
 
+    V_DrawPatchDirect (OptionsDef.x + 175,OptionsDef.y+LINEHEIGHT*detail,0,
+		       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
+
+    M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(scrnsize+1),
+		 9,screenSize);
+
     M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(mousesens+1),
 		 10,mouseSensitivity);
 
-    M_WriteText(OptionsDef.x, OptionsDef.y+LINEHEIGHT*keybinds+2,
+    M_WriteText(OptionsDef.x, OptionsDef.y+LINEHEIGHT*configs+2,
+        "CONFIGURATION");
+}
+
+void M_DrawConfig(void)
+{
+    V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+
+    M_WriteText(ConfigDef.x, ConfigDef.y+LINEHEIGHT*cfg_mousevert+2,
+        "MOUSE VERT MOVE");
+    M_WriteText(ConfigDef.x + 160, ConfigDef.y+LINEHEIGHT*cfg_mousevert+2,
+        mouseVertical ? "ON" : "OFF");
+
+    M_WriteText(ConfigDef.x, ConfigDef.y+LINEHEIGHT*cfg_fullscreen+2,
+        "FULLSCREEN");
+    M_WriteText(ConfigDef.x + 160, ConfigDef.y+LINEHEIGHT*cfg_fullscreen+2,
+        I_IsFullscreen() ? "ON" : "OFF");
+
+    M_WriteText(ConfigDef.x, ConfigDef.y+LINEHEIGHT*cfg_keybinds+2,
         "KEYBOARD SETUP");
-	
-    M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(scrnsize+1),
-		 9,screenSize);
 }
 
 void M_Options(int choice)
 {
     M_SetupNextMenu(&OptionsDef);
+}
+
+void M_Config(int choice)
+{
+    choice = 0;
+    M_SetupNextMenu(&ConfigDef);
 }
 
 void M_Keyboard(int choice)
@@ -1061,6 +1113,19 @@ void M_Keyboard(int choice)
 void M_BindKey(int choice)
 {
     keyBindingSlot = choice;
+}
+
+void M_ToggleMouseVertical(int choice)
+{
+    choice = 0;
+    mouseVertical = !mouseVertical;
+    M_SaveDefaults();
+}
+
+void M_ToggleFullscreenOption(int choice)
+{
+    choice = 0;
+    I_ToggleFullscreen();
 }
 
 static void M_GetKeyName(int key, char *buffer)

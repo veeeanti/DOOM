@@ -207,6 +207,7 @@ extern int	viewwidth;
 extern int	viewheight;
 
 extern int	mouseSensitivity;
+extern int	mouseVertical;
 extern int	showMessages;
 
 extern int	detailLevel;
@@ -246,6 +247,7 @@ typedef struct
 default_t	defaults[] =
 {
     {"mouse_sensitivity",&mouseSensitivity, 5},
+    {"mouse_vertical",&mouseVertical, 1},
     {"sfx_volume",&snd_SfxVolume, 8},
     {"music_volume",&snd_MusicVolume, 8},
     {"show_messages",&showMessages, 1},

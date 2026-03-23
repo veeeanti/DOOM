@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(linuxdoom C)
+project(linuxdoom VERSION 1.10.0 LANGUAGES C)
 
 set(DOOM_CORE_SOURCES
     am_map.c
@@ -64,11 +64,18 @@ set(DOOM_CORE_SOURCES
 )
 
 if(WIN32)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/win32/doom.rc.in
+        ${CMAKE_CURRENT_BINARY_DIR}/doom.rc
+        @ONLY
+    )
+
     set(DOOM_PLATFORM_SOURCES
         win32/i_video_win32.c
         win32/i_system_win32.c
         win32/i_sound_win32.c
         win32/i_net_stub.c
+        ${CMAKE_CURRENT_BINARY_DIR}/doom.rc
     )
 else()
     set(DOOM_PLATFORM_SOURCES
@@ -85,6 +92,10 @@ add_executable(linuxxdoom
 )
 
 target_include_directories(linuxxdoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(WIN32)
+    set_target_properties(linuxxdoom PROPERTIES OUTPUT_NAME doom)
+endif()
 
 if(WIN32)
     target_compile_definitions(linuxxdoom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32 R_OK=4)

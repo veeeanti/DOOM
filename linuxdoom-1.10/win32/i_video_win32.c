@@ -25,6 +25,73 @@ static int s_rawinput;
 static int s_mousecaptured;
 static int s_cursorhidden;
 static int s_ignore_mousemove;
+static int s_fullscreen;
+static RECT s_windowed_rect;
+static DWORD s_windowed_style;
+
+static void set_mouse_capture(HWND hwnd, int capture);
+
+static void center_mouse_cursor(HWND hwnd, int clip)
+{
+    RECT rc;
+    RECT clip_rc;
+    POINT center;
+
+    GetClientRect(hwnd, &rc);
+    center.x = (rc.left + rc.right) / 2;
+    center.y = (rc.top + rc.bottom) / 2;
+
+    clip_rc = rc;
+    MapWindowPoints(hwnd, NULL, (POINT *)&clip_rc, 2);
+    ClientToScreen(hwnd, &center);
+
+    if (clip)
+        ClipCursor(&clip_rc);
+
+    SetCursorPos(center.x, center.y);
+    s_ignore_mousemove = 1;
+}
+
+static void apply_fullscreen_state(void)
+{
+    if (!s_hwnd)
+        return;
+
+    if (s_fullscreen)
+    {
+        MONITORINFO mi;
+
+        s_windowed_style = (DWORD)GetWindowLong(s_hwnd, GWL_STYLE);
+        GetWindowRect(s_hwnd, &s_windowed_rect);
+
+        SetWindowLong(s_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(MonitorFromWindow(s_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+
+        SetWindowPos(s_hwnd,
+                     HWND_TOP,
+                     mi.rcMonitor.left,
+                     mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+    else
+    {
+        SetWindowLong(s_hwnd, GWL_STYLE, s_windowed_style);
+        SetWindowPos(s_hwnd,
+                     NULL,
+                     s_windowed_rect.left,
+                     s_windowed_rect.top,
+                     s_windowed_rect.right - s_windowed_rect.left,
+                     s_windowed_rect.bottom - s_windowed_rect.top,
+                     SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+
+    if (s_grabmouse)
+        set_mouse_capture(s_hwnd, 1);
+}
 
 static int translate_key(WPARAM vk)
 {
@@ -147,18 +214,15 @@ static void set_mouse_capture(HWND hwnd, int capture)
             s_cursorhidden = 1;
         }
 
-        if (!s_rawinput)
-        {
-            GetClientRect(hwnd, &clip);
-            center.x = (clip.left + clip.right) / 2;
-            center.y = (clip.top + clip.bottom) / 2;
+        GetClientRect(hwnd, &clip);
+        center.x = (clip.left + clip.right) / 2;
+        center.y = (clip.top + clip.bottom) / 2;
 
-            MapWindowPoints(hwnd, NULL, (POINT *)&clip, 2);
-            ClientToScreen(hwnd, &center);
-            ClipCursor(&clip);
-            SetCursorPos(center.x, center.y);
-            s_ignore_mousemove = 1;
-        }
+        MapWindowPoints(hwnd, NULL, (POINT *)&clip, 2);
+        ClientToScreen(hwnd, &center);
+        ClipCursor(&clip);
+        SetCursorPos(center.x, center.y);
+        s_ignore_mousemove = 1;
 
         s_mousecaptured = 1;
     }
@@ -170,8 +234,7 @@ static void set_mouse_capture(HWND hwnd, int capture)
         if (GetCapture() == hwnd)
             ReleaseCapture();
 
-        if (!s_rawinput)
-            ClipCursor(NULL);
+        ClipCursor(NULL);
 
         if (s_cursorhidden)
         {
@@ -241,7 +304,10 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                 int dy = (int)raw.data.mouse.lLastY;
 
                 if (dx || dy)
+                {
                     post_mouse_event(current_mouse_buttons(), dx << 2, -dy << 2);
+                    center_mouse_cursor(hwnd, 1);
+                }
             }
             return 0;
         }
@@ -249,6 +315,13 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
+        if ((wparam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
+            || wparam == VK_F11)
+        {
+            I_ToggleFullscreen();
+            return 0;
+        }
+
         if (!(lparam & (1 << 30)))
         {
             event_t event;
@@ -452,6 +525,17 @@ void I_ShutdownGraphics(void)
     s_initialized = 0;
 }
 
+void I_ToggleFullscreen(void)
+{
+    s_fullscreen = !s_fullscreen;
+    apply_fullscreen_state();
+}
+
+int I_IsFullscreen(void)
+{
+    return s_fullscreen;
+}
+
 void I_InitGraphics(void)
 {
     static int firsttime = 1;
@@ -473,6 +557,8 @@ void I_InitGraphics(void)
         s_multiply = 3;
     if (M_CheckParm("-4"))
         s_multiply = 4;
+
+    s_fullscreen = M_CheckParm("-fullscreen") && !M_CheckParm("-windowed");
 
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = DoomWndProc;
@@ -508,6 +594,12 @@ void I_InitGraphics(void)
 
     ShowWindow(s_hwnd, SW_SHOW);
     UpdateWindow(s_hwnd);
+
+    s_windowed_style = style;
+    GetWindowRect(s_hwnd, &s_windowed_rect);
+
+    if (s_fullscreen)
+        apply_fullscreen_state();
 
     s_hdc = GetDC(s_hwnd);
     if (!s_hdc)

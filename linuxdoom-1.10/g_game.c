@@ -189,6 +189,7 @@ boolean*	mousebuttons = &mousearray[1];		// allow [-1]
 // mouse values are used once 
 int             mousex;
 int		mousey;         
+int             mouseVertical = 1;
 
 int             dclicktime;
 int		dclickstate;
@@ -402,7 +403,8 @@ void G_BuildTiccmd (ticcmd_t* cmd)
 	} 
     } 
  
-    forward += mousey; 
+    if (mouseVertical)
+	forward += mousey; 
     if (strafe) 
 	side += mousex*2; 
     else 
