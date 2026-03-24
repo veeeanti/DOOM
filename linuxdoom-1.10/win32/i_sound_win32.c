@@ -13,6 +13,7 @@
 #include "i_sound.h"
 #include "i_system.h"
 #include "m_argv.h"
+#include "ogg_temp.h"
 #include "w_wad.h"
 #include "z_zone.h"
 
@@ -576,6 +577,49 @@ static int create_temp_midi_path(char *path, size_t path_size)
 
     remove(temp_file);
     snprintf(path, path_size, "%s.mid", temp_file);
+    return 1;
+}
+
+static int create_temp_music_path(const char *extension, char *path, size_t path_size)
+{
+    char temp_dir[MAX_PATH];
+    char temp_file[MAX_PATH];
+
+    if (!extension || !extension[0])
+        return 0;
+
+    if (!GetTempPathA(MAX_PATH, temp_dir))
+        return 0;
+
+    if (!GetTempFileNameA(temp_dir, "dmu", 0, temp_file))
+        return 0;
+
+    remove(temp_file);
+    snprintf(path, path_size, "%s%s", temp_file, extension);
+    return 1;
+}
+
+static int create_temp_music_file(const unsigned char *musicdata, int musiclen,
+    const char *extension, char *out_path, size_t out_path_size)
+{
+    if (!musicdata || musiclen <= 0)
+    {
+        set_music_error("missing music data");
+        return 0;
+    }
+
+    if (!create_temp_music_path(extension, out_path, out_path_size))
+    {
+        set_music_error("failed to create a temporary music path");
+        return 0;
+    }
+
+    if (!write_file(out_path, musicdata, (size_t)musiclen))
+    {
+        set_music_error("failed to write temporary music file");
+        return 0;
+    }
+
     return 1;
 }
 
@@ -1253,8 +1297,15 @@ void I_ResumeSong(int handle)
 
 int I_RegisterSong(void *data)
 {
+    unsigned char *loaded_lump;
+    const unsigned char *song_data;
+    int song_length;
     int slot;
     songtype_t type;
+
+    loaded_lump = NULL;
+    song_data = (const unsigned char *)data;
+    song_length = s_music_lumplength;
 
     slot = allocate_song_slot();
     if (slot < 0)
@@ -1273,25 +1324,87 @@ int I_RegisterSong(void *data)
         return slot + 1;
     }
 
-    if (!data || s_music_lumplength <= 0)
+    if (!song_data && s_music_lumpnum >= 0 && song_length > 0)
     {
+        loaded_lump = (unsigned char *)malloc((size_t)song_length);
+        if (!loaded_lump)
+        {
+            release_song_slot(slot);
+            fprintf(stderr, "I_RegisterSong: failed allocation of %d bytes for music lump %s\n",
+                song_length, s_music_name);
+            return 0;
+        }
+
+        W_ReadLump(s_music_lumpnum, loaded_lump);
+        song_data = loaded_lump;
+    }
+
+    if (!song_data || song_length <= 0)
+    {
+        free(loaded_lump);
         release_song_slot(slot);
         fprintf(stderr, "I_RegisterSong: missing music lump data for %s\n", s_music_name);
         return 0;
     }
 
-    if (!create_temp_midi_file((const unsigned char *)data, s_music_lumplength,
-        s_songslots[slot].path, sizeof(s_songslots[slot].path)))
+    if (song_length >= 4 && memcmp(song_data, "MUS\x1a", 4) == 0)
     {
+        if (!create_temp_midi_file(song_data, song_length,
+            s_songslots[slot].path, sizeof(s_songslots[slot].path)))
+        {
+            free(loaded_lump);
+            release_song_slot(slot);
+            fprintf(stderr, "I_RegisterSong: failed to convert MUS %s to MIDI (%s)\n",
+                s_music_name, s_music_error);
+            return 0;
+        }
+
+        s_songslots[slot].temporary = 1;
+        s_songslots[slot].type = SONG_TYPE_MIDI;
+        fprintf(stderr, "I_RegisterSong: converted %s to temporary MIDI\n", s_music_name);
+    }
+    else if (song_length >= 4 && memcmp(song_data, "MThd", 4) == 0)
+    {
+        if (!create_temp_music_file(song_data, song_length, ".mid",
+            s_songslots[slot].path, sizeof(s_songslots[slot].path)))
+        {
+            free(loaded_lump);
+            release_song_slot(slot);
+            fprintf(stderr, "I_RegisterSong: failed to create temporary MIDI %s (%s)\n",
+                s_music_name, s_music_error);
+            return 0;
+        }
+
+        s_songslots[slot].temporary = 1;
+        s_songslots[slot].type = SONG_TYPE_MIDI;
+        fprintf(stderr, "I_RegisterSong: loaded embedded MIDI %s\n", s_music_name);
+    }
+    else if (song_length >= 4 && memcmp(song_data, "OggS", 4) == 0)
+    {
+        if (!OGG_WriteTempWavFromMemory(song_data, song_length,
+            s_songslots[slot].path, sizeof(s_songslots[slot].path)))
+        {
+            free(loaded_lump);
+            release_song_slot(slot);
+            fprintf(stderr, "I_RegisterSong: failed to decode OGG %s (%s)\n",
+                s_music_name, s_music_error);
+            return 0;
+        }
+
+        s_songslots[slot].temporary = 1;
+        s_songslots[slot].type = SONG_TYPE_DIGITAL;
+        fprintf(stderr, "I_RegisterSong: loaded embedded OGG %s\n", s_music_name);
+    }
+    else
+    {
+        free(loaded_lump);
         release_song_slot(slot);
-        fprintf(stderr, "I_RegisterSong: failed to convert MUS %s to MIDI (%s)\n",
-            s_music_name, s_music_error);
+        fprintf(stderr, "I_RegisterSong: unsupported embedded music format for %s\n",
+            s_music_name);
         return 0;
     }
 
-    s_songslots[slot].temporary = 1;
-    s_songslots[slot].type = SONG_TYPE_MIDI;
-    fprintf(stderr, "I_RegisterSong: converted %s to temporary MIDI\n", s_music_name);
+    free(loaded_lump);
     return slot + 1;
 }
 
