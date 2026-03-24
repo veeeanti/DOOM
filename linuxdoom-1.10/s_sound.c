@@ -678,8 +678,13 @@ S_ChangeMusic
     I_SetMusicLump(music->name, music->lumpnum);
 
     // load & register it
+#ifdef _WIN32
+    music->data = 0;
+    music->handle = I_RegisterSong(0);
+#else
     music->data = (void *) W_CacheLumpNum(music->lumpnum, PU_MUSIC);
     music->handle = I_RegisterSong(music->data);
+#endif
 
     // play it
     I_PlaySong(music->handle, looping);
@@ -697,7 +702,8 @@ void S_StopMusic(void)
 
 	I_StopSong(mus_playing->handle);
 	I_UnRegisterSong(mus_playing->handle);
-	Z_ChangeTag(mus_playing->data, PU_CACHE);
+    if (mus_playing->data)
+        Z_ChangeTag(mus_playing->data, PU_CACHE);
 	
 	mus_playing->data = 0;
 	mus_playing = 0;
