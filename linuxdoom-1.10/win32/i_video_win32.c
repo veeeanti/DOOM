@@ -4,6 +4,7 @@
 #undef boolean
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -18,6 +19,9 @@ static HDC s_hdc;
 static BITMAPINFO s_bmi;
 static unsigned int s_palette[256];
 static unsigned int s_pixels[SCREENWIDTH * SCREENHEIGHT];
+static unsigned int *s_pixels_scaled = NULL;
+static int s_scaled_width;
+static int s_scaled_height;
 static int s_multiply = 2;
 static int s_initialized;
 static int s_grabmouse;
@@ -30,6 +34,21 @@ static RECT s_windowed_rect;
 static DWORD s_windowed_style;
 
 static void set_mouse_capture(HWND hwnd, int capture);
+
+// Nearest-neighbor upscaling of framebuffer
+static void scale_pixels_nearest_neighbor(void)
+{
+    int x, y, px, py;
+    for (y = 0; y < s_scaled_height; ++y)
+    {
+        for (x = 0; x < s_scaled_width; ++x)
+        {
+            px = x / s_multiply;  // Source pixel x
+            py = y / s_multiply;  // Source pixel y
+            s_pixels_scaled[y * s_scaled_width + x] = s_pixels[py * SCREENWIDTH + px];
+        }
+    }
+}
 
 static void center_mouse_cursor(HWND hwnd, int clip)
 {
@@ -470,9 +489,15 @@ void I_FinishUpdate(void)
     for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; ++i)
         s_pixels[i] = s_palette[screens[0][i]];
 
+    // Scale pixels using nearest-neighbor interpolation
+    scale_pixels_nearest_neighbor();
+
     GetClientRect(s_hwnd, &rect);
     dst_w = rect.right - rect.left;
     dst_h = rect.bottom - rect.top;
+
+    // Use nearest-neighbor scaling for crisp pixel-art rendering
+    SetStretchBltMode(s_hdc, COLORONCOLOR);
 
     StretchDIBits(s_hdc,
                   0,
@@ -481,9 +506,9 @@ void I_FinishUpdate(void)
                   dst_h,
                   0,
                   0,
-                  SCREENWIDTH,
-                  SCREENHEIGHT,
-                  s_pixels,
+                  s_scaled_width,
+                  s_scaled_height,
+                  s_pixels_scaled,
                   &s_bmi,
                   DIB_RGB_COLORS,
                   SRCCOPY);
@@ -520,6 +545,12 @@ void I_ShutdownGraphics(void)
     {
         DestroyWindow(s_hwnd);
         s_hwnd = NULL;
+    }
+
+    if (s_pixels_scaled)
+    {
+        free(s_pixels_scaled);
+        s_pixels_scaled = NULL;
     }
 
     s_initialized = 0;
@@ -605,10 +636,17 @@ void I_InitGraphics(void)
     if (!s_hdc)
         I_Error("GetDC failed");
 
+    // Allocate scaled framebuffer
+    s_scaled_width = SCREENWIDTH * s_multiply;
+    s_scaled_height = SCREENHEIGHT * s_multiply;
+    s_pixels_scaled = malloc(s_scaled_width * s_scaled_height * sizeof(unsigned int));
+    if (!s_pixels_scaled)
+        I_Error("malloc failed for scaled framebuffer");
+
     memset(&s_bmi, 0, sizeof(s_bmi));
     s_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    s_bmi.bmiHeader.biWidth = SCREENWIDTH;
-    s_bmi.bmiHeader.biHeight = -SCREENHEIGHT;
+    s_bmi.bmiHeader.biWidth = s_scaled_width;
+    s_bmi.bmiHeader.biHeight = -s_scaled_height;
     s_bmi.bmiHeader.biPlanes = 1;
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;
