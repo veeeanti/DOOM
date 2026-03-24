@@ -13,6 +13,7 @@
 #include "i_system.h"
 #include "i_video.h"
 #include "m_misc.h"
+#include "win32/discord_rpc_win32.h"
 
 int mb_used = 6;
 
@@ -68,6 +69,7 @@ void I_Init(void)
 void I_Quit(void)
 {
     D_QuitNetGame();
+    I_DiscordRPC_Shutdown();
     I_ShutdownSound();
     I_ShutdownMusic();
     M_SaveDefaults();
@@ -116,6 +118,7 @@ void I_Error(char *error, ...)
         G_CheckDemoStatus();
 
     D_QuitNetGame();
+    I_DiscordRPC_Shutdown();
     I_ShutdownGraphics();
 
     exit(-1);

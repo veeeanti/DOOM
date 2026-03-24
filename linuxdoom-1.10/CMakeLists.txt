@@ -71,6 +71,7 @@ if(WIN32)
     )
 
     set(DOOM_PLATFORM_SOURCES
+        win32/discord_rpc_win32.c
         win32/i_video_win32.c
         win32/i_system_win32.c
         win32/i_sound_win32.c

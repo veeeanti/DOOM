@@ -87,6 +87,10 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 #include "d_main.h"
 
+#ifdef _WIN32
+#include "win32/discord_rpc_win32.h"
+#endif
+
 //
 // D-DoomLoop()
 // Not a globally visible function,
@@ -376,6 +380,10 @@ void D_DoomLoop (void)
 	
     I_InitGraphics ();
 
+#ifdef _WIN32
+	I_DiscordRPC_Init();
+#endif
+
     while (1)
     {
 	// frame syncronous IO operations
@@ -403,6 +411,10 @@ void D_DoomLoop (void)
 
 	// Update display, next frame, with current state.
 	D_Display ();
+
+#ifdef _WIN32
+	I_DiscordRPC_Update();
+#endif
 
 #ifndef SNDSERV
 	// Sound mixing for the buffer is snychronous.
