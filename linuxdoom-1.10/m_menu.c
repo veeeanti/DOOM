@@ -39,6 +39,9 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #ifdef LoadMenu
 #undef LoadMenu
 #endif
+#endif
+
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
 #include "win32/steam_transport.h"
 #endif
 
@@ -144,7 +147,7 @@ char			savegamestrings[10][SAVESTRINGSIZE];
 
 char	endstring[160];
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
 #define STEAM_BROWSER_SLOTS 6
 static char steamBrowserTitles[STEAM_BROWSER_SLOTS][96];
 static char steamBrowserDetails[STEAM_BROWSER_SLOTS][128];
@@ -1080,7 +1083,7 @@ void M_MusicVol(int choice)
 //
 // M_DrawMainMenu
 //
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
 static void M_UpdateSteamBrowserState(void)
 {
     int i;
@@ -1310,6 +1313,7 @@ static void M_AppendArg(char *buffer, size_t buffer_size, const char *arg)
 
 static void M_RelaunchWithArgs(const char *extra_args)
 {
+#ifdef _WIN32
     char exe_path[MAX_PATH];
     char exe_dir[MAX_PATH];
     char command[4096];
@@ -1370,13 +1374,58 @@ static void M_RelaunchWithArgs(const char *extra_args)
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     I_Quit();
+#else
+    char command[4096];
+    int i;
+    int skip_next = 0;
+
+    snprintf(command, sizeof(command), "%s", myargv[0]);
+
+    for (i = 1; i < myargc; ++i)
+    {
+        if (!strcasecmp(myargv[i], "-warp"))
+        {
+            while (i + 1 < myargc && myargv[i + 1][0] != '-')
+                ++i;
+            continue;
+        }
+
+        if (M_SkipRelaunchArg(myargv[i], &skip_next))
+            continue;
+
+        M_AppendArg(command, sizeof(command), myargv[i]);
+    }
+
+    if (extra_args && extra_args[0])
+    {
+        strcat(command, " ");
+        strcat(command, extra_args);
+    }
+
+    {
+        pid_t pid = fork();
+        if (pid < 0)
+        {
+            M_StartMessage("FAILED TO LAUNCH DOOM", NULL, false);
+            return;
+        }
+
+        if (pid == 0)
+        {
+            execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+            _exit(127);
+        }
+    }
+
+    I_Quit();
+#endif
 }
 #endif
 
 void M_DrawMainMenu(void)
 {
     V_DrawPatchDirect (94,2,0,W_CacheLumpName("M_DOOM",PU_CACHE));
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     M_WriteText(MainDef.x + 56, MainDef.y + LINEHEIGHT*multiplayer + 2,
         "MULTIPLAYER");
 #endif
@@ -1396,12 +1445,17 @@ void M_DrawMultiplayer(void)
     M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_browser + 2,
         "BROWSE PUBLIC LOBBIES");
 
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     if (STEAM_IsActive())
         M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*(mp_browser + 2) + 2,
             "STEAM MODE ACTIVE: NO RESTART NEEDED");
     else
         M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*(mp_browser + 2) + 2,
             "USE DOOM-LAUNCHER-COOP OR -DM FOR STEAM");
+#else
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*(mp_browser + 2) + 2,
+        "STEAMWORKS SUPPORT NOT BUILT");
+#endif
 }
 
 void M_DrawSteamCoopSetup(void)
@@ -1421,13 +1475,13 @@ void M_DrawSteamCoopSetup(void)
     M_WriteText(SteamCoopDef.x, SteamCoopDef.y + LINEHEIGHT * (steam_coop_start + 2) + 2,
         "LEFT/RIGHT CHANGES MAP");
 #else
-    M_WriteText(32, 72, "STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS");
+    M_WriteText(32, 72, "STEAM HOSTING REQUIRES STEAMWORKS BUILD");
 #endif
 }
 
 void M_DrawSteamBrowser(void)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     int i;
     STEAM_Update();
     M_UpdateSteamBrowserState();
@@ -1454,7 +1508,7 @@ void M_DrawSteamBrowser(void)
         M_WriteText(SteamBrowserDef.x, SteamBrowserDef.y + LINEHEIGHT * (STEAM_BROWSER_SLOTS + 1) + 2,
             "RUN DOOM-LAUNCHER-COOP OR -DM FIRST");
 #else
-    M_WriteText(32, 72, "STEAM BROWSER IS ONLY AVAILABLE ON WINDOWS");
+    M_WriteText(32, 72, "STEAM BROWSER REQUIRES STEAMWORKS BUILD");
 #endif
 }
 
@@ -1467,18 +1521,18 @@ void M_Multiplayer(int choice)
 void M_HostSteamCoop(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     M_InitSteamCoopMapFromArgs();
     M_SetupNextMenu(&SteamCoopDef);
     itemOn = steam_coop_map;
 #else
-    M_StartMessage("STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+    M_StartMessage("STEAM HOSTING REQUIRES STEAMWORKS BUILD", NULL, false);
 #endif
 }
 
 void M_ChangeSteamCoopMap(int choice)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     if (gamemode == commercial)
     {
         if (choice == 0)
@@ -1508,7 +1562,7 @@ void M_ChangeSteamCoopMap(int choice)
 
 void M_StartSteamCoopLobby(int choice)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     char args[256];
 
     choice = 0;
@@ -1536,7 +1590,7 @@ void M_StartSteamCoopLobby(int choice)
 void M_HostSteamDeathmatch(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     if (STEAM_IsActive())
     {
         M_StartMessage("DEATHMATCH HOSTING STILL USES COMMAND-LINE MODE", NULL, false);
@@ -1545,14 +1599,14 @@ void M_HostSteamDeathmatch(int choice)
 
     M_RelaunchWithArgs("-deathmatch -net 1 -steamhost");
 #else
-    M_StartMessage("STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+    M_StartMessage("STEAM HOSTING REQUIRES STEAMWORKS BUILD", NULL, false);
 #endif
 }
 
 void M_QuickPlaySteamCoop(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     M_RelaunchWithArgs("-net 1 -steamquick coop -steamallowsolo");
 #endif
 }
@@ -1560,7 +1614,7 @@ void M_QuickPlaySteamCoop(int choice)
 void M_QuickPlaySteamDeathmatch(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     M_RelaunchWithArgs("-deathmatch -net 1 -steamquick deathmatch -steamallowsolo");
 #endif
 }
@@ -1568,7 +1622,7 @@ void M_QuickPlaySteamDeathmatch(int choice)
 void M_OpenSteamBrowser(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     if (!STEAM_EnsureClient())
     {
         M_StartMessage((char *)STEAM_LastError(), NULL, false);
@@ -1580,13 +1634,13 @@ void M_OpenSteamBrowser(int choice)
     itemOn = steam_refresh;
     M_UpdateSteamBrowserState();
 #else
-    M_StartMessage("STEAM BROWSER IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+    M_StartMessage("STEAM BROWSER REQUIRES STEAMWORKS BUILD", NULL, false);
 #endif
 }
 
 void M_OpenSteamBrowserAtStartup(void)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     if (!M_CheckParm("-steambrowser"))
         return;
 
@@ -1598,7 +1652,7 @@ void M_OpenSteamBrowserAtStartup(void)
 void M_SteamBrowserRefresh(int choice)
 {
     choice = 0;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     STEAM_RequestLobbyList();
     M_UpdateSteamBrowserState();
 #endif
@@ -1606,7 +1660,7 @@ void M_SteamBrowserRefresh(int choice)
 
 void M_SteamBrowserJoin(int choice)
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(DOOM_ENABLE_STEAMWORKS)
     int slot = choice - steam_lobby_1;
     char args[256];
     char warp_args[32];

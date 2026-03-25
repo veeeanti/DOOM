@@ -22,6 +22,7 @@ extern "C" {
 
 #include <algorithm>
 #include <cstdint>
+#include <ctime>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,9 +54,81 @@ extern "C" {
 #undef MAXLONG
 #endif
 
+#ifdef _WIN32
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #undef boolean
+#else
+#include <limits.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+typedef unsigned int DWORD;
+
+#ifndef MAX_PATH
+#define MAX_PATH PATH_MAX
+#endif
+
+#ifndef INVALID_FILE_ATTRIBUTES
+#define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
+#endif
+
+#ifndef FILE_ATTRIBUTE_DIRECTORY
+#define FILE_ATTRIBUTE_DIRECTORY 0x10
+#endif
+
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
+#define _strtoui64 strtoull
+
+static DWORD GetTickCount(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (DWORD)((ts.tv_sec * 1000ULL) + (ts.tv_nsec / 1000000ULL));
+}
+
+static void Sleep(DWORD ms)
+{
+    usleep((useconds_t)(ms * 1000));
+}
+
+static DWORD GetCurrentDirectoryA(DWORD size, char *out)
+{
+    if (!out || size == 0)
+        return 0;
+    if (!getcwd(out, (size_t)size))
+        return 0;
+    return (DWORD)strlen(out);
+}
+
+static DWORD GetModuleFileNameA(void *unused, char *out, DWORD size)
+{
+    ssize_t n;
+    (void)unused;
+
+    if (!out || size < 2)
+        return 0;
+
+    n = readlink("/proc/self/exe", out, (size_t)size - 1);
+    if (n < 0)
+        return 0;
+
+    out[n] = '\0';
+    return (DWORD)n;
+}
+
+static DWORD GetFileAttributesA(const char *path)
+{
+    struct stat st;
+    if (!path || stat(path, &st) != 0)
+        return INVALID_FILE_ATTRIBUTES;
+    if (S_ISDIR(st.st_mode))
+        return FILE_ATTRIBUTE_DIRECTORY;
+    return 0;
+}
+#endif
 
 static int g_active;
 static char g_last_error[256] = "Steam transport inactive";
@@ -754,6 +827,13 @@ static int resolve_appid(int argc, char **argv)
 
 static void log_runtime_context(void)
 {
+#ifdef _WIN32
+    const char *sep = "\\";
+    const char *steam_runtime = "steam_api64.dll";
+#else
+    const char *sep = "/";
+    const char *steam_runtime = "libsteam_api.so";
+#endif
     char exe_path[MAX_PATH];
     char exe_dir[MAX_PATH];
     char cwd[MAX_PATH];
@@ -798,10 +878,10 @@ static void log_runtime_context(void)
 
     if (exe_dir[0])
     {
-        snprintf(dll_path, sizeof(dll_path), "%s\\steam_api64.dll", exe_dir);
-        steam_logf("steam_api64.dll near exe: %s", file_exists(dll_path) ? "present" : "missing");
+        snprintf(dll_path, sizeof(dll_path), "%s%s%s", exe_dir, sep, steam_runtime);
+        steam_logf("%s near exe: %s", steam_runtime, file_exists(dll_path) ? "present" : "missing");
 
-        snprintf(appid_in_exe_dir, sizeof(appid_in_exe_dir), "%s\\steam_appid.txt", exe_dir);
+        snprintf(appid_in_exe_dir, sizeof(appid_in_exe_dir), "%s%ssteam_appid.txt", exe_dir, sep);
         appid_exe = read_steam_appid_txt(appid_in_exe_dir);
         if (appid_exe > 0)
             steam_logf("steam_appid.txt near exe: %d", appid_exe);
@@ -811,7 +891,7 @@ static void log_runtime_context(void)
 
     if (cwd[0])
     {
-        snprintf(appid_in_cwd, sizeof(appid_in_cwd), "%s\\steam_appid.txt", cwd);
+        snprintf(appid_in_cwd, sizeof(appid_in_cwd), "%s%ssteam_appid.txt", cwd, sep);
         appid_cwd = read_steam_appid_txt(appid_in_cwd);
         if (appid_cwd > 0)
             steam_logf("steam_appid.txt in cwd: %d", appid_cwd);

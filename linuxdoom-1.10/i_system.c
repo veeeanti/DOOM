@@ -29,8 +29,13 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <string.h>
 
 #include <stdarg.h>
+#include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/time.h>
 #include <unistd.h>
+#endif
 
 #include "doomdef.h"
 #include "m_misc.h"
@@ -39,6 +44,10 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 
 #include "d_net.h"
 #include "g_game.h"
+
+#ifdef DOOM_ENABLE_DISCORD_RPC
+#include "win32/discord_rpc_win32.h"
+#endif
 
 #ifdef __GNUG__
 #pragma implementation "i_system.h"
@@ -87,6 +96,15 @@ byte* I_ZoneBase (int*	size)
 //
 int  I_GetTime (void)
 {
+#ifdef _WIN32
+    static int basetime = 0;
+    int newtics;
+    int time_ms = timeGetTime();
+    if (!basetime)
+        basetime = time_ms;
+    newtics = (time_ms - basetime) * TICRATE / 1000;
+    return newtics;
+#else
     struct timeval	tp;
     struct timezone	tzp;
     int			newtics;
@@ -97,6 +115,7 @@ int  I_GetTime (void)
 	basetime = tp.tv_sec;
     newtics = (tp.tv_sec-basetime)*TICRATE + tp.tv_usec*TICRATE/1000000;
     return newtics;
+#endif
 }
 
 
@@ -116,6 +135,9 @@ void I_Init (void)
 void I_Quit (void)
 {
     D_QuitNetGame ();
+#ifdef DOOM_ENABLE_DISCORD_RPC
+    I_DiscordRPC_Shutdown();
+#endif
     I_ShutdownSound();
     I_ShutdownMusic();
     M_SaveDefaults ();

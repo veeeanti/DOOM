@@ -1,6 +1,221 @@
+#ifdef _WIN32
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #undef boolean
+#else
+#include <errno.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+typedef int HANDLE;
+typedef uint32_t DWORD;
+
+#ifndef INVALID_HANDLE_VALUE
+#define INVALID_HANDLE_VALUE (-1)
+#endif
+
+#define GENERIC_READ  0x1
+#define GENERIC_WRITE 0x2
+#define OPEN_EXISTING 3
+#define FILE_ATTRIBUTE_NORMAL 0
+
+static int open_discord_unix_socket_from_pipe_name(const char *pipe_name)
+{
+    const char *dash;
+    int index;
+    const char *dirs[16];
+    const char *explicit_ipc_path;
+    int uid;
+    char run_user_dir[64];
+    char flatpak_stable_dir[128];
+    char flatpak_ptb_dir[128];
+    char flatpak_canary_dir[128];
+    char snap_stable_dir[128];
+    char snap_ptb_dir[128];
+    char snap_canary_dir[128];
+    char explicit_socket_path[108];
+    char explicit_socket_dir[108];
+    int d;
+
+    if (!pipe_name)
+        return -1;
+
+    dash = strrchr(pipe_name, '-');
+    if (!dash || !dash[1])
+        return -1;
+
+    index = atoi(dash + 1);
+    if (index < 0)
+        return -1;
+
+    uid = (int)geteuid();
+    snprintf(run_user_dir, sizeof(run_user_dir), "/run/user/%d", uid);
+    snprintf(flatpak_stable_dir, sizeof(flatpak_stable_dir), "%s/app/com.discordapp.Discord", run_user_dir);
+    snprintf(flatpak_ptb_dir, sizeof(flatpak_ptb_dir), "%s/app/com.discordapp.DiscordPTB", run_user_dir);
+    snprintf(flatpak_canary_dir, sizeof(flatpak_canary_dir), "%s/app/com.discordapp.DiscordCanary", run_user_dir);
+    snprintf(snap_stable_dir, sizeof(snap_stable_dir), "%s/snap.discord", run_user_dir);
+    snprintf(snap_ptb_dir, sizeof(snap_ptb_dir), "%s/snap.discord-ptb", run_user_dir);
+    snprintf(snap_canary_dir, sizeof(snap_canary_dir), "%s/snap.discord-canary", run_user_dir);
+
+    explicit_ipc_path = getenv("DISCORD_IPC_PATH");
+    if (explicit_ipc_path && explicit_ipc_path[0])
+    {
+        if (strstr(explicit_ipc_path, "discord-ipc-") != NULL)
+        {
+            snprintf(explicit_socket_path, sizeof(explicit_socket_path), "%s", explicit_ipc_path);
+            explicit_socket_dir[0] = '\0';
+        }
+        else
+        {
+            snprintf(explicit_socket_dir, sizeof(explicit_socket_dir), "%s", explicit_ipc_path);
+            snprintf(explicit_socket_path, sizeof(explicit_socket_path), "%s/discord-ipc-%d", explicit_socket_dir, index);
+        }
+    }
+    else
+    {
+        explicit_socket_path[0] = '\0';
+        explicit_socket_dir[0] = '\0';
+    }
+
+    dirs[0] = explicit_socket_dir[0] ? explicit_socket_dir : NULL;
+    dirs[1] = getenv("XDG_RUNTIME_DIR");
+    dirs[2] = run_user_dir;
+    dirs[3] = flatpak_stable_dir;
+    dirs[4] = flatpak_ptb_dir;
+    dirs[5] = flatpak_canary_dir;
+    dirs[6] = snap_stable_dir;
+    dirs[7] = snap_ptb_dir;
+    dirs[8] = snap_canary_dir;
+    dirs[9] = getenv("TMPDIR");
+    dirs[10] = getenv("TEMP");
+    dirs[11] = getenv("TMP");
+    dirs[12] = "/tmp";
+    dirs[13] = NULL;
+
+    if (explicit_socket_path[0])
+    {
+        struct sockaddr_un addr;
+        int fd;
+
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd >= 0)
+        {
+            memset(&addr, 0, sizeof(addr));
+            addr.sun_family = AF_UNIX;
+            snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", explicit_socket_path);
+
+            if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+                return fd;
+
+            close(fd);
+        }
+    }
+
+    for (d = 0; dirs[d]; ++d)
+    {
+        struct sockaddr_un addr;
+        int fd;
+        char path[108];
+
+        if (!dirs[d] || !dirs[d][0])
+            continue;
+
+        snprintf(path, sizeof(path), "%s/discord-ipc-%d", dirs[d], index);
+
+        fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0)
+            continue;
+
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
+
+        if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+            return fd;
+
+        close(fd);
+    }
+
+    return -1;
+}
+
+static HANDLE CreateFileA(const char *name,
+                          DWORD desired_access,
+                          DWORD share_mode,
+                          void *security,
+                          DWORD creation_disposition,
+                          DWORD flags,
+                          void *template_file)
+{
+    (void)desired_access;
+    (void)share_mode;
+    (void)security;
+    (void)creation_disposition;
+    (void)flags;
+    (void)template_file;
+    return open_discord_unix_socket_from_pipe_name(name);
+}
+
+static int CloseHandle(HANDLE h)
+{
+    return close(h);
+}
+
+static int WriteFile(HANDLE h, const void *buf, DWORD len, DWORD *written, void *overlapped)
+{
+    ssize_t n;
+    (void)overlapped;
+
+    n = write(h, buf, (size_t)len);
+    if (written)
+        *written = (n > 0) ? (DWORD)n : 0;
+    return n == (ssize_t)len;
+}
+
+static int ReadFile(HANDLE h, void *buf, DWORD len, DWORD *read_out, void *overlapped)
+{
+    ssize_t n;
+    (void)overlapped;
+
+    n = read(h, buf, (size_t)len);
+    if (read_out)
+        *read_out = (n > 0) ? (DWORD)n : 0;
+    return n == (ssize_t)len;
+}
+
+static int PeekNamedPipe(HANDLE h,
+                         void *buffer,
+                         DWORD nbuffer,
+                         DWORD *bytes_read,
+                         DWORD *bytes_available,
+                         DWORD *bytes_left)
+{
+    int available = 0;
+    (void)buffer;
+    (void)nbuffer;
+    (void)bytes_read;
+    (void)bytes_left;
+
+    if (ioctl(h, FIONREAD, &available) != 0)
+        return 0;
+
+    if (bytes_available)
+        *bytes_available = (DWORD)((available > 0) ? available : 0);
+    return 1;
+}
+
+static unsigned long GetCurrentProcessId(void)
+{
+    return (unsigned long)getpid();
+}
+#endif
 
 #include <stdint.h>
 #include <stdio.h>
@@ -30,6 +245,7 @@ static int s_last_connect_attempt_tic;
 static int s_last_update_tic;
 static unsigned int s_nonce;
 static char s_app_id[64];
+static char s_client_secret[128];
 static gamestate_t s_last_gamestate = (gamestate_t)-1;
 static int s_last_gameepisode = -1;
 static int s_last_gamemap = -1;
@@ -167,7 +383,7 @@ static int connect_and_handshake(void)
 {
     int i;
     char pipe_name[64];
-    char handshake[160];
+    char handshake[320];
 
     for (i = 0; i < 10; ++i)
     {
@@ -187,7 +403,18 @@ static int connect_and_handshake(void)
     if (s_pipe == INVALID_HANDLE_VALUE)
         return 0;
 
-    snprintf(handshake, sizeof(handshake), "{\"v\":1,\"client_id\":\"%s\"}", s_app_id);
+    if (s_client_secret[0])
+    {
+        snprintf(handshake,
+                 sizeof(handshake),
+                 "{\"v\":1,\"client_id\":\"%s\",\"client_secret\":\"%s\"}",
+                 s_app_id,
+                 s_client_secret);
+    }
+    else
+    {
+        snprintf(handshake, sizeof(handshake), "{\"v\":1,\"client_id\":\"%s\"}", s_app_id);
+    }
     if (!send_frame(DISCORD_OP_HANDSHAKE, handshake))
     {
         close_pipe();
@@ -593,6 +820,7 @@ static void send_clear_presence(void)
 void I_DiscordRPC_Init(void)
 {
     const char *app_id;
+    const char *client_secret;
     const char *join_secret;
     const char *party_id;
 
@@ -609,12 +837,18 @@ void I_DiscordRPC_Init(void)
     snprintf(s_app_id, sizeof(s_app_id), "%s", app_id);
 
     join_secret = resolve_optional_arg("-discordjoinsecret");
+    client_secret = resolve_optional_arg("-discordclientsecret");
+    if (!client_secret)
+        client_secret = getenv("DISCORD_CLIENT_SECRET");
     party_id = resolve_optional_arg("-discordpartyid");
 
     s_join_secret[0] = '\0';
+    s_client_secret[0] = '\0';
     s_party_id[0] = '\0';
     if (join_secret)
         snprintf(s_join_secret, sizeof(s_join_secret), "%s", join_secret);
+    if (client_secret)
+        snprintf(s_client_secret, sizeof(s_client_secret), "%s", client_secret);
     if (party_id)
         snprintf(s_party_id, sizeof(s_party_id), "%s", party_id);
 

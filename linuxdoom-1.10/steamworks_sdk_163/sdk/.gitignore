@@ -1,0 +1,10 @@
+glmgr/*
+steamworksexample/*
+tools/*
+
+# android steammm.. . mmmm...
+redistributable_bin/androidarm64/*
+# does anyone ever even use arm64 lol
+redistributable_bin/linuxarm64/*
+# fUCK NO, nEVER !! ! haaate macs.
+redistributable_bin/osx/*
