@@ -38,7 +38,7 @@
 //  one that defines the actual packets to
 //  be transmitted.
 //
-
+/* What the hell is this supposed to be? Does it interfere?? ~vee */
 #define DOOMCOM_ID		0x12345678l
 
 // Max computers/players in a game.

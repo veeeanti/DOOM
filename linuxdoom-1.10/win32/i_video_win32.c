@@ -19,10 +19,11 @@ static HDC s_hdc;
 static BITMAPINFO s_bmi;
 static unsigned int s_palette[256];
 static unsigned int s_pixels[SCREENWIDTH * SCREENHEIGHT];
-static unsigned int *s_pixels_scaled = NULL;
-static int s_scaled_width;
-static int s_scaled_height;
-static int s_multiply = 2;
+static unsigned int *s_pixels_integer = NULL;
+static int s_integer_width;
+static int s_integer_height;
+static int s_multiply = 4;
+static int s_smoothscale = 1;
 static int s_initialized;
 static int s_grabmouse;
 static int s_rawinput;
@@ -35,17 +36,50 @@ static DWORD s_windowed_style;
 
 static void set_mouse_capture(HWND hwnd, int capture);
 
-// Nearest-neighbor upscaling of framebuffer
-static void scale_pixels_nearest_neighbor(void)
+static void ensure_integer_buffer(int width, int height)
 {
-    int x, y, px, py;
-    for (y = 0; y < s_scaled_height; ++y)
+    size_t count;
+
+    if (width <= 0 || height <= 0)
+        return;
+
+    if (s_pixels_integer && s_integer_width == width && s_integer_height == height)
+        return;
+
+    if (s_pixels_integer)
     {
-        for (x = 0; x < s_scaled_width; ++x)
+        free(s_pixels_integer);
+        s_pixels_integer = NULL;
+    }
+
+    count = (size_t)width * (size_t)height;
+    s_pixels_integer = malloc(count * sizeof(unsigned int));
+    if (!s_pixels_integer)
+        I_Error("malloc failed for integer framebuffer");
+
+    s_integer_width = width;
+    s_integer_height = height;
+}
+
+static void scale_pixels_integer_nearest(int factor)
+{
+    int x, y;
+    int srcx, srcy;
+    int out_w;
+
+    if (factor < 1)
+        factor = 1;
+
+    out_w = SCREENWIDTH * factor;
+    ensure_integer_buffer(out_w, SCREENHEIGHT * factor);
+
+    for (y = 0; y < s_integer_height; ++y)
+    {
+        srcy = y / factor;
+        for (x = 0; x < s_integer_width; ++x)
         {
-            px = x / s_multiply;  // Source pixel x
-            py = y / s_multiply;  // Source pixel y
-            s_pixels_scaled[y * s_scaled_width + x] = s_pixels[py * SCREENWIDTH + px];
+            srcx = x / factor;
+            s_pixels_integer[y * s_integer_width + x] = s_pixels[srcy * SCREENWIDTH + srcx];
         }
     }
 }
@@ -466,8 +500,16 @@ void I_FinishUpdate(void)
     int i;
     static int lasttic;
     RECT rect;
+    int client_w;
+    int client_h;
+    int logical_w;
+    int logical_h;
+    int integer_factor;
+    int dst_x;
+    int dst_y;
     int dst_w;
     int dst_h;
+    int mode;
 
     if (!s_initialized)
         return;
@@ -489,26 +531,70 @@ void I_FinishUpdate(void)
     for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; ++i)
         s_pixels[i] = s_palette[screens[0][i]];
 
-    // Scale pixels using nearest-neighbor interpolation
-    scale_pixels_nearest_neighbor();
-
     GetClientRect(s_hwnd, &rect);
-    dst_w = rect.right - rect.left;
-    dst_h = rect.bottom - rect.top;
+    client_w = rect.right - rect.left;
+    client_h = rect.bottom - rect.top;
+    dst_w = client_w;
+    dst_h = client_h;
 
-    // Use nearest-neighbor scaling for crisp pixel-art rendering
-    SetStretchBltMode(s_hdc, COLORONCOLOR);
+    // Preserve a 4:3 presentation aspect so fullscreen does not look stretched.
+    if (dst_w * 3 > dst_h * 4)
+    {
+        int fit_w = dst_h * 4 / 3;
+        dst_x = (dst_w - fit_w) / 2;
+        dst_y = 0;
+        dst_w = fit_w;
+    }
+    else
+    {
+        int fit_h = dst_w * 3 / 4;
+        dst_x = 0;
+        dst_y = (dst_h - fit_h) / 2;
+        dst_h = fit_h;
+    }
+
+    logical_w = dst_w;
+    logical_h = dst_h * 5 / 6;
+    if (logical_h < 1)
+        logical_h = 1;
+
+    integer_factor = logical_w / SCREENWIDTH;
+    if (logical_h / SCREENHEIGHT < integer_factor)
+        integer_factor = logical_h / SCREENHEIGHT;
+    if (integer_factor < 1)
+        integer_factor = 1;
+
+    scale_pixels_integer_nearest(integer_factor);
+
+    // Hybrid scaling: nearest-neighbor integer upscale first, optional smooth
+    // pass only for the small fractional remainder to reduce blur.
+    mode = s_smoothscale ? HALFTONE : COLORONCOLOR;
+    SetStretchBltMode(s_hdc, mode);
+    if (mode == HALFTONE)
+        SetBrushOrgEx(s_hdc, 0, 0, NULL);
+
+    if (dst_x > 0)
+        PatBlt(s_hdc, 0, 0, dst_x, client_h, BLACKNESS);
+    if (dst_x + dst_w < client_w)
+        PatBlt(s_hdc, dst_x + dst_w, 0, client_w - (dst_x + dst_w), client_h, BLACKNESS);
+    if (dst_y > 0)
+        PatBlt(s_hdc, 0, 0, client_w, dst_y, BLACKNESS);
+    if (dst_y + dst_h < client_h)
+        PatBlt(s_hdc, 0, dst_y + dst_h, client_w, client_h - (dst_y + dst_h), BLACKNESS);
+
+    s_bmi.bmiHeader.biWidth = s_integer_width;
+    s_bmi.bmiHeader.biHeight = -s_integer_height;
 
     StretchDIBits(s_hdc,
-                  0,
-                  0,
+                  dst_x,
+                  dst_y,
                   dst_w,
                   dst_h,
                   0,
                   0,
-                  s_scaled_width,
-                  s_scaled_height,
-                  s_pixels_scaled,
+                  s_integer_width,
+                  s_integer_height,
+                  s_pixels_integer,
                   &s_bmi,
                   DIB_RGB_COLORS,
                   SRCCOPY);
@@ -547,10 +633,12 @@ void I_ShutdownGraphics(void)
         s_hwnd = NULL;
     }
 
-    if (s_pixels_scaled)
+    if (s_pixels_integer)
     {
-        free(s_pixels_scaled);
-        s_pixels_scaled = NULL;
+        free(s_pixels_integer);
+        s_pixels_integer = NULL;
+        s_integer_width = 0;
+        s_integer_height = 0;
     }
 
     s_initialized = 0;
@@ -588,6 +676,53 @@ void I_InitGraphics(void)
         s_multiply = 3;
     if (M_CheckParm("-4"))
         s_multiply = 4;
+    if (M_CheckParm("-5"))
+        s_multiply = 5;
+    if (M_CheckParm("-6"))
+        s_multiply = 6;
+
+    if (M_CheckParm("-sharp"))
+        s_smoothscale = 0;
+    if (M_CheckParm("-smooth"))
+        s_smoothscale = 1;
+
+    if (!M_CheckParm("-1")
+        && !M_CheckParm("-2")
+        && !M_CheckParm("-3")
+        && !M_CheckParm("-4")
+        && !M_CheckParm("-5")
+        && !M_CheckParm("-6"))
+    {
+        RECT work;
+        int work_w;
+        int work_h;
+        int fit_w;
+        int fit_h;
+        int auto_mul;
+
+        work.left = 0;
+        work.top = 0;
+        work.right = GetSystemMetrics(SM_CXSCREEN);
+        work.bottom = GetSystemMetrics(SM_CYSCREEN);
+        SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
+
+        work_w = work.right - work.left;
+        work_h = work.bottom - work.top;
+
+        fit_w = (work_w * 9) / 10;
+        fit_h = (work_h * 9) / 10;
+
+        auto_mul = fit_w / SCREENWIDTH;
+        if (fit_h / ((SCREENHEIGHT * 6) / 5) < auto_mul)
+            auto_mul = fit_h / ((SCREENHEIGHT * 6) / 5);
+
+        if (auto_mul < 2)
+            auto_mul = 2;
+        if (auto_mul > 8)
+            auto_mul = 8;
+
+        s_multiply = auto_mul;
+    }
 
     s_fullscreen = M_CheckParm("-fullscreen") && !M_CheckParm("-windowed");
 
@@ -602,7 +737,7 @@ void I_InitGraphics(void)
 
     style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     window_w = SCREENWIDTH * s_multiply;
-    window_h = SCREENHEIGHT * s_multiply;
+    window_h = (SCREENHEIGHT * 6 / 5) * s_multiply;
     rect.left = 0;
     rect.top = 0;
     rect.right = window_w;
@@ -636,17 +771,10 @@ void I_InitGraphics(void)
     if (!s_hdc)
         I_Error("GetDC failed");
 
-    // Allocate scaled framebuffer
-    s_scaled_width = SCREENWIDTH * s_multiply;
-    s_scaled_height = SCREENHEIGHT * s_multiply;
-    s_pixels_scaled = malloc(s_scaled_width * s_scaled_height * sizeof(unsigned int));
-    if (!s_pixels_scaled)
-        I_Error("malloc failed for scaled framebuffer");
-
     memset(&s_bmi, 0, sizeof(s_bmi));
     s_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    s_bmi.bmiHeader.biWidth = s_scaled_width;
-    s_bmi.bmiHeader.biHeight = -s_scaled_height;
+    s_bmi.bmiHeader.biWidth = SCREENWIDTH;
+    s_bmi.bmiHeader.biHeight = -SCREENHEIGHT;
     s_bmi.bmiHeader.biPlanes = 1;
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;

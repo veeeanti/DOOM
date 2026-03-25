@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -34,6 +35,14 @@ static int s_last_gameepisode = -1;
 static int s_last_gamemap = -1;
 static int s_last_netgame = -1;
 static int s_last_deathmatch = -1;
+static char s_join_secret[128];
+static char s_party_id[128];
+static int s_party_size;
+static int s_party_max;
+static char s_presence_mode[32];
+static char s_presence_content[96];
+static unsigned int s_presence_serial;
+static unsigned int s_last_presence_serial;
 
 // Default Discord application id used when no override is provided.
 static const char *s_default_app_id = "1485899956291112990";
@@ -51,6 +60,29 @@ static const char *resolve_discord_app_id(void)
     }
 
     return s_default_app_id;
+}
+
+static const char *resolve_optional_arg(const char *name)
+{
+    int p = M_CheckParm((char *)name);
+    if (p && p + 1 < myargc)
+        return myargv[p + 1];
+    return NULL;
+}
+
+static int parse_optional_int(const char *name, int fallback)
+{
+    const char *v = resolve_optional_arg(name);
+    int parsed;
+
+    if (!v || !v[0])
+        return fallback;
+
+    parsed = atoi(v);
+    if (parsed < 0)
+        return fallback;
+
+    return parsed;
 }
 
 static void close_pipe(void)
@@ -223,9 +255,189 @@ static void json_escape(char *dst, size_t dst_size, const char *src)
     dst[di] = '\0';
 }
 
+static int contains_nocase(const char *text, const char *needle)
+{
+    size_t i;
+    size_t j;
+    size_t needle_len;
+
+    if (!text || !needle || !needle[0])
+        return 0;
+
+    needle_len = strlen(needle);
+    for (i = 0; text[i]; ++i)
+    {
+        for (j = 0; j < needle_len; ++j)
+        {
+            unsigned char tc = (unsigned char)text[i + j];
+            unsigned char nc = (unsigned char)needle[j];
+
+            if (!tc)
+                return 0;
+
+            if (tolower(tc) != tolower(nc))
+                break;
+        }
+
+        if (j == needle_len)
+            return 1;
+    }
+
+    return 0;
+}
+
+static void basename_without_ext(char *dst, size_t dst_size, const char *path)
+{
+    const char *base;
+    const char *slash;
+    const char *dot;
+    size_t len;
+    size_t i;
+
+    if (!dst_size)
+        return;
+
+    dst[0] = '\0';
+    if (!path || !path[0])
+        return;
+
+    base = path;
+    slash = strrchr(path, '/');
+    if (slash && slash[1])
+        base = slash + 1;
+    slash = strrchr(base, '\\');
+    if (slash && slash[1])
+        base = slash + 1;
+
+    dot = strrchr(base, '.');
+    len = dot && dot > base ? (size_t)(dot - base) : strlen(base);
+    if (len >= dst_size)
+        len = dst_size - 1;
+
+    memcpy(dst, base, len);
+    dst[len] = '\0';
+
+    for (i = 0; dst[i]; ++i)
+    {
+        if (dst[i] == '_' || dst[i] == '-')
+            dst[i] = ' ';
+    }
+}
+
+static void get_mode_label(char *mode, size_t mode_size)
+{
+    if (deathmatch)
+        snprintf(mode, mode_size, "Deathmatch");
+    else if (netgame)
+        snprintf(mode, mode_size, "Co-op");
+    else
+        snprintf(mode, mode_size, "Single Player");
+}
+
+static void get_wad_title(char *wad_title, size_t wad_title_size)
+{
+    int i;
+    const char *source = NULL;
+
+    if (s_presence_content[0])
+    {
+        basename_without_ext(wad_title, wad_title_size, s_presence_content);
+        if (wad_title[0])
+            return;
+    }
+
+    i = M_CheckParm("-file");
+    if (i)
+    {
+        int j;
+        for (j = i + 1; j < myargc; ++j)
+        {
+            if (myargv[j][0] == '-')
+                break;
+            source = myargv[j];
+            break;
+        }
+    }
+
+    if (!source)
+    {
+        i = M_CheckParm("-iwad");
+        if (i && i + 1 < myargc)
+            source = myargv[i + 1];
+    }
+
+    if (source)
+    {
+        basename_without_ext(wad_title, wad_title_size, source);
+        if (wad_title[0])
+            return;
+    }
+
+    switch (gamemission)
+    {
+    case pack_plut:
+        snprintf(wad_title, wad_title_size, "Plutonia");
+        break;
+    case pack_tnt:
+        snprintf(wad_title, wad_title_size, "TNT Evilution");
+        break;
+    case doom2:
+        snprintf(wad_title, wad_title_size, "DOOM II");
+        break;
+    default:
+        if (gamemode == retail)
+            snprintf(wad_title, wad_title_size, "The Ultimate DOOM");
+        else if (gamemode == registered)
+            snprintf(wad_title, wad_title_size, "DOOM Registered");
+        else if (gamemode == shareware)
+            snprintf(wad_title, wad_title_size, "DOOM Shareware");
+        else
+            snprintf(wad_title, wad_title_size, "DOOM");
+        break;
+    }
+}
+
+static const char *get_large_image_key(const char *wad_title)
+{
+    if (contains_nocase(wad_title, "plutonia"))
+        return "plutonia";
+    if (contains_nocase(wad_title, "tnt"))
+        return "tnt";
+    if (contains_nocase(wad_title, "doom2") || contains_nocase(wad_title, "doom ii"))
+        return "doom2";
+    if (contains_nocase(wad_title, "sigil"))
+        return "sigil";
+    if (modifiedgame)
+        return "pwad";
+    return "doomguy";
+}
+
+static const char *get_small_image_key(void)
+{
+    if (s_presence_mode[0])
+    {
+        if (contains_nocase(s_presence_mode, "deathmatch"))
+            return "dm";
+        if (contains_nocase(s_presence_mode, "coop") || contains_nocase(s_presence_mode, "co-op"))
+            return "coop";
+    }
+
+    if (deathmatch)
+        return "dm";
+    if (netgame)
+        return "coop";
+    return "single";
+}
+
 static void get_presence_strings(char *details, size_t details_size,
                                  char *state, size_t state_size)
 {
+    char mode[32];
+    char wad_title[64];
+
+    get_mode_label(mode, sizeof(mode));
+    get_wad_title(wad_title, sizeof(wad_title));
+
     if (gamestate == GS_LEVEL)
     {
         if (gamemode == commercial)
@@ -233,12 +445,10 @@ static void get_presence_strings(char *details, size_t details_size,
         else
             snprintf(details, details_size, "E%dM%d", gameepisode, gamemap);
 
-        if (deathmatch)
-            snprintf(state, state_size, "Deathmatch");
-        else if (netgame)
-            snprintf(state, state_size, "Co-op");
+        if (wad_title[0])
+            snprintf(state, state_size, "%s - %s", mode, wad_title);
         else
-            snprintf(state, state_size, "Single Player");
+            snprintf(state, state_size, "%s", mode);
 
         return;
     }
@@ -259,22 +469,66 @@ static void get_presence_strings(char *details, size_t details_size,
         break;
     }
 
-    snprintf(state, state_size, "Idle");
+    if (wad_title[0])
+        snprintf(state, state_size, "Idle - %s", wad_title);
+    else
+        snprintf(state, state_size, "Idle");
 }
 
 static int send_activity_update(void)
 {
     char details[64];
     char state[64];
+    char wad_title[64];
     char details_json[128];
     char state_json[128];
+    char wad_title_json[128];
+    char mode_json[64];
     char payload[768];
     char nonce[32];
+    const char *large_image;
+    const char *small_image;
+    char mode_label[32];
     int wrote;
+    char party_block[256];
+    char join_block[192];
+
+    party_block[0] = '\0';
+    join_block[0] = '\0';
+
+    if (s_party_id[0] && s_party_max > 0)
+    {
+        int effective_size = s_party_size;
+        if (effective_size < 0)
+            effective_size = 0;
+        if (effective_size > s_party_max)
+            effective_size = s_party_max;
+
+        snprintf(party_block,
+                 sizeof(party_block),
+                 ",\"party\":{\"id\":\"%s\",\"size\":[%d,%d]}",
+                 s_party_id,
+                 effective_size,
+                 s_party_max);
+    }
+
+    if (s_join_secret[0])
+    {
+        snprintf(join_block,
+                 sizeof(join_block),
+                 ",\"secrets\":{\"join\":\"%s\"}",
+                 s_join_secret);
+    }
 
     get_presence_strings(details, sizeof(details), state, sizeof(state));
+    get_wad_title(wad_title, sizeof(wad_title));
+    get_mode_label(mode_label, sizeof(mode_label));
+    large_image = get_large_image_key(wad_title);
+    small_image = get_small_image_key();
     json_escape(details_json, sizeof(details_json), details);
     json_escape(state_json, sizeof(state_json), state);
+    json_escape(wad_title_json, sizeof(wad_title_json), wad_title);
+    json_escape(mode_json, sizeof(mode_json), mode_label);
 
     snprintf(nonce, sizeof(nonce), "%u", ++s_nonce);
 
@@ -283,21 +537,33 @@ static int send_activity_update(void)
         long long started = (long long)time(NULL) - (long long)(leveltime / TICRATE);
         wrote = snprintf(payload,
                          sizeof(payload),
-                         "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%lu,\"activity\":{\"state\":\"%s\",\"details\":\"%s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"doomguy\",\"large_text\":\"DOOM\"}}},\"nonce\":\"%s\"}",
+                         "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%lu,\"activity\":{\"state\":\"%s\",\"details\":\"%s\",\"timestamps\":{\"start\":%lld},\"assets\":{\"large_image\":\"%s\",\"large_text\":\"%s\",\"small_image\":\"%s\",\"small_text\":\"%s\"}%s%s}},\"nonce\":\"%s\"}",
                          (unsigned long)GetCurrentProcessId(),
                          state_json,
                          details_json,
                          started,
+                         large_image,
+                         wad_title_json,
+                         small_image,
+                         mode_json,
+                         party_block,
+                         join_block,
                          nonce);
     }
     else
     {
         wrote = snprintf(payload,
                          sizeof(payload),
-                         "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%lu,\"activity\":{\"state\":\"%s\",\"details\":\"%s\",\"assets\":{\"large_image\":\"doomguy\",\"large_text\":\"DOOM\"}}},\"nonce\":\"%s\"}",
+                         "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%lu,\"activity\":{\"state\":\"%s\",\"details\":\"%s\",\"assets\":{\"large_image\":\"%s\",\"large_text\":\"%s\",\"small_image\":\"%s\",\"small_text\":\"%s\"}%s%s}},\"nonce\":\"%s\"}",
                          (unsigned long)GetCurrentProcessId(),
                          state_json,
                          details_json,
+                         large_image,
+                         wad_title_json,
+                         small_image,
+                         mode_json,
+                         party_block,
+                         join_block,
                          nonce);
     }
 
@@ -327,6 +593,8 @@ static void send_clear_presence(void)
 void I_DiscordRPC_Init(void)
 {
     const char *app_id;
+    const char *join_secret;
+    const char *party_id;
 
     if (s_discord_enabled)
         return;
@@ -339,29 +607,59 @@ void I_DiscordRPC_Init(void)
     }
 
     snprintf(s_app_id, sizeof(s_app_id), "%s", app_id);
+
+    join_secret = resolve_optional_arg("-discordjoinsecret");
+    party_id = resolve_optional_arg("-discordpartyid");
+
+    s_join_secret[0] = '\0';
+    s_party_id[0] = '\0';
+    if (join_secret)
+        snprintf(s_join_secret, sizeof(s_join_secret), "%s", join_secret);
+    if (party_id)
+        snprintf(s_party_id, sizeof(s_party_id), "%s", party_id);
+
+    s_party_size = parse_optional_int("-discordpartysize", netgame ? 2 : 1);
+    s_party_max = parse_optional_int("-discordpartymax", 4);
+
     s_discord_enabled = 1;
     s_last_update_tic = -TICRATE * 10;
     s_last_connect_attempt_tic = -TICRATE * 10;
 
     if (connect_and_handshake())
-        printf("Discord RPC: connected (IPC) with app id %s\n", s_app_id);
+        printf("Discord RPC: connected (IPC) with app id %s (deathmatch=%d, netgame=%d)\n", s_app_id, deathmatch, netgame);
     else
-        printf("Discord RPC: waiting for Discord client (IPC).\n");
+        printf("Discord RPC: waiting for Discord client (IPC). Will notify when deathmatch/mode changes.\n");
 }
 
 void I_DiscordRPC_Update(void)
 {
     int now_tic;
     int should_update;
+    int state_changed;
 
     if (!s_discord_enabled)
         return;
 
     now_tic = I_GetTime();
 
+    // Check if any game state has changed
+    state_changed = 0;
+    if (gamestate != s_last_gamestate
+        || gameepisode != s_last_gameepisode
+        || gamemap != s_last_gamemap
+        || netgame != s_last_netgame
+        || deathmatch != s_last_deathmatch
+        || s_presence_serial != s_last_presence_serial)
+    {
+        state_changed = 1;
+    }
+
     if (!s_discord_connected)
     {
-        if (now_tic - s_last_connect_attempt_tic >= TICRATE * 5)
+        // Try more frequently to connect when state changes (important for mode notifications)
+        int reconnect_interval = state_changed ? TICRATE : TICRATE * 5;
+        
+        if (now_tic - s_last_connect_attempt_tic >= reconnect_interval)
         {
             s_last_connect_attempt_tic = now_tic;
             connect_and_handshake();
@@ -374,13 +672,12 @@ void I_DiscordRPC_Update(void)
     drain_incoming_frames();
 
     should_update = 0;
-    if (gamestate != s_last_gamestate
-        || gameepisode != s_last_gameepisode
-        || gamemap != s_last_gamemap
-        || netgame != s_last_netgame
-        || deathmatch != s_last_deathmatch)
+    if (state_changed)
     {
         should_update = 1;
+        if (deathmatch != s_last_deathmatch || netgame != s_last_netgame)
+            printf("Discord RPC: state changed (deathmatch: %d->%d, netgame: %d->%d)\n", 
+                   s_last_deathmatch, deathmatch, s_last_netgame, netgame);
     }
 
     if (now_tic - s_last_update_tic >= TICRATE * 5)
@@ -401,6 +698,7 @@ void I_DiscordRPC_Update(void)
     s_last_gamemap = gamemap;
     s_last_netgame = netgame;
     s_last_deathmatch = deathmatch;
+    s_last_presence_serial = s_presence_serial;
 }
 
 void I_DiscordRPC_Shutdown(void)
@@ -416,4 +714,46 @@ void I_DiscordRPC_Shutdown(void)
 
     close_pipe();
     s_discord_enabled = 0;
+}
+
+void I_DiscordRPC_SetSteamJoin(unsigned long long lobby_id,
+                               int party_size,
+                               int party_max,
+                               const char *mode,
+                               const char *content)
+{
+    if (!lobby_id)
+    {
+        s_join_secret[0] = '\0';
+        s_party_id[0] = '\0';
+        s_presence_mode[0] = '\0';
+        s_presence_content[0] = '\0';
+        ++s_presence_serial;
+        return;
+    }
+
+    if (party_size < 1)
+        party_size = 1;
+    if (party_max < party_size)
+        party_max = party_size;
+
+    snprintf(s_join_secret, sizeof(s_join_secret), "steam:%llu", lobby_id);
+    snprintf(s_party_id, sizeof(s_party_id), "steam-%llu", lobby_id);
+    if (mode && mode[0])
+        snprintf(s_presence_mode, sizeof(s_presence_mode), "%s", mode);
+    else
+        s_presence_mode[0] = '\0';
+    if (content && content[0])
+        snprintf(s_presence_content, sizeof(s_presence_content), "%s", content);
+    else
+        s_presence_content[0] = '\0';
+    s_party_size = party_size;
+    s_party_max = party_max;
+    ++s_presence_serial;
+
+    /* Force a presence refresh on next update tick. */
+    s_last_gamestate = (gamestate_t)-1;
+    s_last_netgame = -1;
+    s_last_deathmatch = -1;
+    s_last_update_tic = -TICRATE * 10;
 }

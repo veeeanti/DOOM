@@ -32,6 +32,16 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #include <stdlib.h>
 #include <ctype.h>
 
+#ifdef _WIN32
+#define boolean windows_boolean_workaround
+#include <windows.h>
+#undef boolean
+#ifdef LoadMenu
+#undef LoadMenu
+#endif
+#include "win32/steam_transport.h"
+#endif
+
 
 #include "doomdef.h"
 #include "dstrings.h"
@@ -134,6 +144,15 @@ char			savegamestrings[10][SAVESTRINGSIZE];
 
 char	endstring[160];
 
+#ifdef _WIN32
+#define STEAM_BROWSER_SLOTS 6
+static char steamBrowserTitles[STEAM_BROWSER_SLOTS][96];
+static char steamBrowserDetails[STEAM_BROWSER_SLOTS][128];
+static unsigned long long steamBrowserLobbyIds[STEAM_BROWSER_SLOTS];
+static int steamCoopMapEpisode = 1;
+static int steamCoopMapNumber = 1;
+#endif
+
 
 //
 // MENU TYPEDEFS
@@ -182,6 +201,7 @@ menu_t*	currentMenu;
 // PROTOTYPES
 //
 void M_NewGame(int choice);
+void M_Multiplayer(int choice);
 void M_Episode(int choice);
 void M_ChooseSkill(int choice);
 void M_LoadGame(int choice);
@@ -214,6 +234,9 @@ void M_QuickSave(void);
 void M_QuickLoad(void);
 
 void M_DrawMainMenu(void);
+void M_DrawMultiplayer(void);
+void M_DrawSteamCoopSetup(void);
+void M_DrawSteamBrowser(void);
 void M_DrawReadThis1(void);
 void M_DrawReadThis2(void);
 void M_DrawNewGame(void);
@@ -238,6 +261,16 @@ void M_StartMessage(char *string,void *routine,boolean input);
 void M_StopMessage(void);
 void M_ClearMenus (void);
 
+void M_HostSteamCoop(int choice);
+void M_HostSteamDeathmatch(int choice);
+void M_QuickPlaySteamCoop(int choice);
+void M_QuickPlaySteamDeathmatch(int choice);
+void M_ChangeSteamCoopMap(int choice);
+void M_StartSteamCoopLobby(int choice);
+void M_OpenSteamBrowser(int choice);
+void M_SteamBrowserRefresh(int choice);
+void M_SteamBrowserJoin(int choice);
+
 extern int		key_right;
 extern int		key_left;
 extern int		key_up;
@@ -259,6 +292,7 @@ extern int		mouseVertical;
 enum
 {
     newgame = 0,
+    multiplayer,
     options,
     loadgame,
     savegame,
@@ -270,6 +304,7 @@ enum
 menuitem_t MainMenu[]=
 {
     {1,"M_NGAME",M_NewGame,'n'},
+    {1,"",M_Multiplayer,'p'},
     {1,"M_OPTION",M_Options,'o'},
     {1,"M_LOADG",M_LoadGame,'l'},
     {1,"M_SAVEG",M_SaveGame,'s'},
@@ -285,6 +320,91 @@ menu_t MainDef =
     MainMenu,
     M_DrawMainMenu,
     97,64,
+    0
+};
+
+enum
+{
+    mp_host_coop,
+    mp_host_dm,
+    mp_quick_coop,
+    mp_quick_dm,
+    mp_browser,
+    mp_end
+} multiplayer_e;
+
+menuitem_t MultiplayerMenu[]=
+{
+    {1,"",M_HostSteamCoop,'c'},
+    {1,"",M_HostSteamDeathmatch,'d'},
+    {1,"",M_QuickPlaySteamCoop,'q'},
+    {1,"",M_QuickPlaySteamDeathmatch,'w'},
+    {1,"",M_OpenSteamBrowser,'b'}
+};
+
+menu_t MultiplayerDef =
+{
+    mp_end,
+    &MainDef,
+    MultiplayerMenu,
+    M_DrawMultiplayer,
+    48,56,
+    0
+};
+
+enum
+{
+    steam_coop_map,
+    steam_coop_start,
+    steam_coop_end
+} steam_coop_e;
+
+menuitem_t SteamCoopMenu[]=
+{
+    {2,"",M_ChangeSteamCoopMap,'m'},
+    {1,"",M_StartSteamCoopLobby,'s'}
+};
+
+menu_t SteamCoopDef =
+{
+    steam_coop_end,
+    &MultiplayerDef,
+    SteamCoopMenu,
+    M_DrawSteamCoopSetup,
+    48,56,
+    0
+};
+
+enum
+{
+    steam_refresh,
+    steam_lobby_1,
+    steam_lobby_2,
+    steam_lobby_3,
+    steam_lobby_4,
+    steam_lobby_5,
+    steam_lobby_6,
+    steam_browser_end
+} steam_browser_e;
+
+menuitem_t SteamBrowserMenu[]=
+{
+    {1,"",M_SteamBrowserRefresh,'r'},
+    {-1,"",M_SteamBrowserJoin,'1'},
+    {-1,"",M_SteamBrowserJoin,'2'},
+    {-1,"",M_SteamBrowserJoin,'3'},
+    {-1,"",M_SteamBrowserJoin,'4'},
+    {-1,"",M_SteamBrowserJoin,'5'},
+    {-1,"",M_SteamBrowserJoin,'6'}
+};
+
+menu_t SteamBrowserDef =
+{
+    steam_browser_end,
+    &MultiplayerDef,
+    SteamBrowserMenu,
+    M_DrawSteamBrowser,
+    24,44,
     0
 };
 
@@ -363,9 +483,9 @@ enum
     detail,
     scrnsize,
     mousesens,
-    configs,
-    option_empty1,
     soundvol,
+    option_empty1,
+    configs,
     opt_end
 } options_e;
 
@@ -376,9 +496,9 @@ menuitem_t OptionsMenu[]=
     {2,"M_DETAIL", M_ChangeDetail,'g'},
     {2,"M_SCRNSZ", M_SizeDisplay,'s'},
     {2,"M_MSENS", M_ChangeSensitivity,'m'},
-    {1,"", M_Config,'c'},
+    {1,"M_SVOL", M_Sound,'s'},
     {-1,"",0},
-    {1,"M_SVOL", M_Sound,'s'}
+    {1,"", M_Config,'c'}
 };
 
 menu_t  OptionsDef =
@@ -960,9 +1080,571 @@ void M_MusicVol(int choice)
 //
 // M_DrawMainMenu
 //
+#ifdef _WIN32
+static void M_UpdateSteamBrowserState(void)
+{
+    int i;
+    int count = 0;
+
+    memset(steamBrowserTitles, 0, sizeof(steamBrowserTitles));
+    memset(steamBrowserDetails, 0, sizeof(steamBrowserDetails));
+    memset(steamBrowserLobbyIds, 0, sizeof(steamBrowserLobbyIds));
+
+    count = STEAM_GetLobbyCount();
+    if (count > STEAM_BROWSER_SLOTS)
+        count = STEAM_BROWSER_SLOTS;
+
+    SteamBrowserMenu[steam_refresh].status = 1;
+    for (i = 0; i < STEAM_BROWSER_SLOTS; ++i)
+    {
+        SteamBrowserMenu[steam_lobby_1 + i].status = -1;
+        if (i < count && STEAM_GetLobbyInfo(i,
+                                            steamBrowserTitles[i],
+                                            sizeof(steamBrowserTitles[i]),
+                                            steamBrowserDetails[i],
+                                            sizeof(steamBrowserDetails[i]),
+                                            &steamBrowserLobbyIds[i]))
+        {
+            if (steamBrowserDetails[i][0]
+                && strlen(steamBrowserTitles[i]) + strlen(steamBrowserDetails[i]) + 4 < sizeof(steamBrowserTitles[i]))
+            {
+                strcat(steamBrowserTitles[i], " | ");
+                strcat(steamBrowserTitles[i], steamBrowserDetails[i]);
+            }
+            SteamBrowserMenu[steam_lobby_1 + i].status = 1;
+        }
+    }
+
+    if (itemOn > steam_refresh && SteamBrowserMenu[itemOn].status == -1)
+        itemOn = steam_refresh;
+}
+
+static int M_StringContainsNoCase(const char *haystack, const char *needle)
+{
+    size_t i;
+    size_t needle_len;
+
+    if (!haystack || !needle)
+        return 0;
+
+    needle_len = strlen(needle);
+    if (!needle_len)
+        return 1;
+
+    for (i = 0; haystack[i]; ++i)
+    {
+        size_t j;
+
+        for (j = 0; j < needle_len; ++j)
+        {
+            char a = haystack[i + j];
+            char b = needle[j];
+
+            if (!a)
+                break;
+            if (tolower((unsigned char)a) != tolower((unsigned char)b))
+                break;
+        }
+
+        if (j == needle_len)
+            return 1;
+    }
+
+    return 0;
+}
+
+static int M_SteamEpisodeCount(void)
+{
+    if (gamemode == retail)
+        return 4;
+    if (gamemode == registered)
+        return 3;
+    return 1;
+}
+
+static int M_SteamMaxMapCount(void)
+{
+    if (gamemode == commercial)
+        return 32;
+    return 9;
+}
+
+static void M_NormalizeSteamCoopMap(void)
+{
+    int max_episode = M_SteamEpisodeCount();
+    int max_map = M_SteamMaxMapCount();
+
+    if (steamCoopMapEpisode < 1)
+        steamCoopMapEpisode = 1;
+    if (steamCoopMapEpisode > max_episode)
+        steamCoopMapEpisode = max_episode;
+
+    if (steamCoopMapNumber < 1)
+        steamCoopMapNumber = 1;
+    if (steamCoopMapNumber > max_map)
+        steamCoopMapNumber = max_map;
+}
+
+static void M_InitSteamCoopMapFromArgs(void)
+{
+    int i;
+
+    steamCoopMapEpisode = 1;
+    steamCoopMapNumber = 1;
+
+    for (i = 1; i < myargc; ++i)
+    {
+        if (strcasecmp(myargv[i], "-warp"))
+            continue;
+
+        if (gamemode == commercial)
+        {
+            if (i + 1 < myargc)
+                steamCoopMapNumber = atoi(myargv[i + 1]);
+        }
+        else
+        {
+            if (i + 2 < myargc && myargv[i + 2][0] != '-')
+            {
+                steamCoopMapEpisode = atoi(myargv[i + 1]);
+                steamCoopMapNumber = atoi(myargv[i + 2]);
+            }
+            else if (i + 1 < myargc)
+            {
+                steamCoopMapNumber = atoi(myargv[i + 1]);
+            }
+        }
+        break;
+    }
+
+    M_NormalizeSteamCoopMap();
+}
+
+static void M_FormatSteamCoopMap(char *out, size_t out_size)
+{
+    if (gamemode == commercial)
+        snprintf(out, out_size, "MAP%02d", steamCoopMapNumber);
+    else
+        snprintf(out, out_size, "E%dM%d", steamCoopMapEpisode, steamCoopMapNumber);
+}
+
+static int M_ParseLobbyMapArgs(int slot, char *warp_args, size_t warp_args_size)
+{
+    int episode;
+    int map;
+
+    if (!warp_args || !warp_args_size)
+        return 0;
+
+    warp_args[0] = '\0';
+
+    if (slot < 0 || slot >= STEAM_BROWSER_SLOTS)
+        return 0;
+
+    if (sscanf(steamBrowserTitles[slot], "%*s MAP%d", &map) == 1 && map > 0)
+    {
+        snprintf(warp_args, warp_args_size, "-warp %d", map);
+        return 1;
+    }
+
+    if (sscanf(steamBrowserTitles[slot], "%*s E%dM%d", &episode, &map) == 2
+        && episode > 0
+        && map > 0)
+    {
+        snprintf(warp_args, warp_args_size, "-warp %d %d", episode, map);
+        return 1;
+    }
+
+    return 0;
+}
+
+static int M_SkipRelaunchArg(const char *arg, int *skip_next)
+{
+    if (*skip_next)
+    {
+        *skip_next = 0;
+        return 1;
+    }
+
+    if (!strcasecmp(arg, "-net")
+        || !strcasecmp(arg, "-steam")
+        || !strcasecmp(arg, "-steamhost")
+        || !strcasecmp(arg, "-steambrowser")
+        || !strcasecmp(arg, "-gns")
+        || !strcasecmp(arg, "-deathmatch")
+        || !strcasecmp(arg, "-altdeath"))
+    {
+        return 1;
+    }
+
+    if (!strcasecmp(arg, "-steamjoin")
+        || !strcasecmp(arg, "-discordjoinsecret")
+        || !strcasecmp(arg, "-discordpartyid")
+        || !strcasecmp(arg, "-discordpartysize")
+        || !strcasecmp(arg, "-discordpartymax"))
+    {
+        *skip_next = 1;
+        return 1;
+    }
+
+    return 0;
+}
+
+static void M_AppendArg(char *buffer, size_t buffer_size, const char *arg)
+{
+    if (strlen(buffer) + strlen(arg) + 4 >= buffer_size)
+        return;
+
+    strcat(buffer, " ");
+    if (strchr(arg, ' '))
+    {
+        strcat(buffer, "\"");
+        strcat(buffer, arg);
+        strcat(buffer, "\"");
+    }
+    else
+    {
+        strcat(buffer, arg);
+    }
+}
+
+static void M_RelaunchWithArgs(const char *extra_args)
+{
+    char exe_path[MAX_PATH];
+    char exe_dir[MAX_PATH];
+    char command[4096];
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    DWORD exe_len;
+    int i;
+    int skip_next = 0;
+
+    exe_len = GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
+    if (!exe_len || exe_len >= sizeof(exe_path))
+    {
+        M_StartMessage("FAILED TO FIND DOOM EXE", NULL, false);
+        return;
+    }
+
+    strcpy(exe_dir, exe_path);
+    for (i = (int)strlen(exe_dir) - 1; i >= 0; --i)
+    {
+        if (exe_dir[i] == '\\' || exe_dir[i] == '/')
+        {
+            exe_dir[i] = '\0';
+            break;
+        }
+    }
+
+    snprintf(command, sizeof(command), "\"%s\"", exe_path);
+    for (i = 1; i < myargc; ++i)
+    {
+        if (!strcasecmp(myargv[i], "-warp"))
+        {
+            while (i + 1 < myargc && myargv[i + 1][0] != '-')
+                ++i;
+            continue;
+        }
+
+        if (M_SkipRelaunchArg(myargv[i], &skip_next))
+            continue;
+        M_AppendArg(command, sizeof(command), myargv[i]);
+    }
+
+    if (extra_args && extra_args[0])
+    {
+        strcat(command, " ");
+        strcat(command, extra_args);
+    }
+
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+
+    if (!CreateProcessA(exe_path, command, NULL, NULL, FALSE, 0, NULL, exe_dir, &si, &pi))
+    {
+        M_StartMessage("FAILED TO LAUNCH DOOM", NULL, false);
+        return;
+    }
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    I_Quit();
+}
+#endif
+
 void M_DrawMainMenu(void)
 {
     V_DrawPatchDirect (94,2,0,W_CacheLumpName("M_DOOM",PU_CACHE));
+#ifdef _WIN32
+    M_WriteText(MainDef.x + 56, MainDef.y + LINEHEIGHT*multiplayer + 2,
+        "MULTIPLAYER");
+#endif
+}
+
+void M_DrawMultiplayer(void)
+{
+    V_DrawPatchDirect (84,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_host_coop + 2,
+        "HOST PUBLIC CO-OP");
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_host_dm + 2,
+        "HOST PUBLIC DEATHMATCH");
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_quick_coop + 2,
+        "QUICK PLAY CO-OP");
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_quick_dm + 2,
+        "QUICK PLAY DEATHMATCH");
+    M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*mp_browser + 2,
+        "BROWSE PUBLIC LOBBIES");
+
+    if (STEAM_IsActive())
+        M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*(mp_browser + 2) + 2,
+            "STEAM MODE ACTIVE: NO RESTART NEEDED");
+    else
+        M_WriteText(MultiplayerDef.x, MultiplayerDef.y + LINEHEIGHT*(mp_browser + 2) + 2,
+            "USE DOOM-LAUNCHER-COOP OR -DM FOR STEAM");
+}
+
+void M_DrawSteamCoopSetup(void)
+{
+#ifdef _WIN32
+    char map_name[16];
+
+    M_FormatSteamCoopMap(map_name, sizeof(map_name));
+
+    V_DrawPatchDirect (78,10,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+    M_WriteText(SteamCoopDef.x, SteamCoopDef.y + LINEHEIGHT * steam_coop_map + 2,
+        "START MAP:");
+    M_WriteText(SteamCoopDef.x + 96, SteamCoopDef.y + LINEHEIGHT * steam_coop_map + 2,
+        map_name);
+    M_WriteText(SteamCoopDef.x, SteamCoopDef.y + LINEHEIGHT * steam_coop_start + 2,
+        "START PUBLIC CO-OP LOBBY");
+    M_WriteText(SteamCoopDef.x, SteamCoopDef.y + LINEHEIGHT * (steam_coop_start + 2) + 2,
+        "LEFT/RIGHT CHANGES MAP");
+#else
+    M_WriteText(32, 72, "STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS");
+#endif
+}
+
+void M_DrawSteamBrowser(void)
+{
+#ifdef _WIN32
+    int i;
+    STEAM_Update();
+    M_UpdateSteamBrowserState();
+
+    V_DrawPatchDirect (78,10,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+    M_WriteText(SteamBrowserDef.x, SteamBrowserDef.y + 2, "REFRESH LOBBY LIST");
+
+    if (STEAM_IsLobbyListPending())
+        M_WriteText(SteamBrowserDef.x + 8, SteamBrowserDef.y + 16, "SCANNING STEAM...");
+    else if (!STEAM_GetLobbyCount())
+        M_WriteText(SteamBrowserDef.x + 8, SteamBrowserDef.y + 16, "NO PUBLIC LOBBIES FOUND");
+
+    for (i = 0; i < STEAM_BROWSER_SLOTS; ++i)
+    {
+        int y = SteamBrowserDef.y + LINEHEIGHT * (i + 1) + 2;
+        if (steamBrowserTitles[i][0])
+            M_WriteText(SteamBrowserDef.x, y, steamBrowserTitles[i]);
+    }
+
+    if (STEAM_IsActive())
+        M_WriteText(SteamBrowserDef.x, SteamBrowserDef.y + LINEHEIGHT * (STEAM_BROWSER_SLOTS + 1) + 2,
+            "PRESS ENTER TO JOIN SELECTED LOBBY");
+    else
+        M_WriteText(SteamBrowserDef.x, SteamBrowserDef.y + LINEHEIGHT * (STEAM_BROWSER_SLOTS + 1) + 2,
+            "RUN DOOM-LAUNCHER-COOP OR -DM FIRST");
+#else
+    M_WriteText(32, 72, "STEAM BROWSER IS ONLY AVAILABLE ON WINDOWS");
+#endif
+}
+
+void M_Multiplayer(int choice)
+{
+    choice = 0;
+    M_SetupNextMenu(&MultiplayerDef);
+}
+
+void M_HostSteamCoop(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    M_InitSteamCoopMapFromArgs();
+    M_SetupNextMenu(&SteamCoopDef);
+    itemOn = steam_coop_map;
+#else
+    M_StartMessage("STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+#endif
+}
+
+void M_ChangeSteamCoopMap(int choice)
+{
+#ifdef _WIN32
+    if (gamemode == commercial)
+    {
+        if (choice == 0)
+            steamCoopMapNumber = (steamCoopMapNumber <= 1) ? 32 : steamCoopMapNumber - 1;
+        else
+            steamCoopMapNumber = (steamCoopMapNumber >= 32) ? 1 : steamCoopMapNumber + 1;
+    }
+    else
+    {
+        int total = M_SteamEpisodeCount() * 9;
+        int index = (steamCoopMapEpisode - 1) * 9 + (steamCoopMapNumber - 1);
+
+        if (choice == 0)
+            index = (index + total - 1) % total;
+        else
+            index = (index + 1) % total;
+
+        steamCoopMapEpisode = index / 9 + 1;
+        steamCoopMapNumber = index % 9 + 1;
+    }
+
+    M_NormalizeSteamCoopMap();
+#else
+    choice = 0;
+#endif
+}
+
+void M_StartSteamCoopLobby(int choice)
+{
+#ifdef _WIN32
+    char args[256];
+
+    choice = 0;
+    M_NormalizeSteamCoopMap();
+
+    if (gamemode == commercial)
+    {
+        snprintf(args, sizeof(args), "-net 1 -steamhost -warp %d", steamCoopMapNumber);
+    }
+    else
+    {
+        snprintf(args,
+                 sizeof(args),
+                 "-net 1 -steamhost -warp %d %d",
+                 steamCoopMapEpisode,
+                 steamCoopMapNumber);
+    }
+
+    M_RelaunchWithArgs(args);
+#else
+    choice = 0;
+#endif
+}
+
+void M_HostSteamDeathmatch(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    if (STEAM_IsActive())
+    {
+        M_StartMessage("DEATHMATCH HOSTING STILL USES COMMAND-LINE MODE", NULL, false);
+        return;
+    }
+
+    M_RelaunchWithArgs("-deathmatch -net 1 -steamhost");
+#else
+    M_StartMessage("STEAM HOSTING IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+#endif
+}
+
+void M_QuickPlaySteamCoop(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    M_RelaunchWithArgs("-net 1 -steamquick coop -steamallowsolo");
+#endif
+}
+
+void M_QuickPlaySteamDeathmatch(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    M_RelaunchWithArgs("-deathmatch -net 1 -steamquick deathmatch -steamallowsolo");
+#endif
+}
+
+void M_OpenSteamBrowser(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    if (!STEAM_EnsureClient())
+    {
+        M_StartMessage((char *)STEAM_LastError(), NULL, false);
+        return;
+    }
+
+    STEAM_RequestLobbyList();
+    M_SetupNextMenu(&SteamBrowserDef);
+    itemOn = steam_refresh;
+    M_UpdateSteamBrowserState();
+#else
+    M_StartMessage("STEAM BROWSER IS ONLY AVAILABLE ON WINDOWS", NULL, false);
+#endif
+}
+
+void M_OpenSteamBrowserAtStartup(void)
+{
+#ifdef _WIN32
+    if (!M_CheckParm("-steambrowser"))
+        return;
+
+    M_StartControlPanel();
+    M_OpenSteamBrowser(0);
+#endif
+}
+
+void M_SteamBrowserRefresh(int choice)
+{
+    choice = 0;
+#ifdef _WIN32
+    STEAM_RequestLobbyList();
+    M_UpdateSteamBrowserState();
+#endif
+}
+
+void M_SteamBrowserJoin(int choice)
+{
+#ifdef _WIN32
+    int slot = choice - steam_lobby_1;
+    char args[256];
+    char warp_args[32];
+    int is_deathmatch;
+
+    if (slot < 0 || slot >= STEAM_BROWSER_SLOTS || !steamBrowserLobbyIds[slot])
+        return;
+
+    is_deathmatch = M_StringContainsNoCase(steamBrowserTitles[slot], "deathmatch")
+        || M_StringContainsNoCase(steamBrowserDetails[slot], "deathmatch");
+
+    if (M_ParseLobbyMapArgs(slot, warp_args, sizeof(warp_args)))
+    {
+        if (is_deathmatch)
+            snprintf(args,
+                     sizeof(args),
+                     "-deathmatch -net 1 -steamjoin %llu %s",
+                     steamBrowserLobbyIds[slot],
+                     warp_args);
+        else
+            snprintf(args,
+                     sizeof(args),
+                     "-net 1 -steamjoin %llu %s",
+                     steamBrowserLobbyIds[slot],
+                     warp_args);
+    }
+    else
+    {
+        if (is_deathmatch)
+            snprintf(args, sizeof(args), "-deathmatch -net 1 -steamjoin %llu", steamBrowserLobbyIds[slot]);
+        else
+            snprintf(args, sizeof(args), "-net 1 -steamjoin %llu", steamBrowserLobbyIds[slot]);
+    }
+
+    M_RelaunchWithArgs(args);
+#else
+    choice = 0;
+#endif
 }
 
 
@@ -1059,16 +1741,16 @@ void M_DrawOptions(void)
 {
     V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
 
-    V_DrawPatchDirect (OptionsDef.x + 120,OptionsDef.y+LINEHEIGHT*messages,0,
+    V_DrawPatchDirect (OptionsDef.x + 140,OptionsDef.y+LINEHEIGHT*messages,0,
 		       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
 
-    V_DrawPatchDirect (OptionsDef.x + 175,OptionsDef.y+LINEHEIGHT*detail,0,
+    V_DrawPatchDirect (OptionsDef.x + 180,OptionsDef.y+LINEHEIGHT*detail,0,
 		       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
 
-    M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(scrnsize+1),
+	M_DrawThermo(OptionsDef.x + 138,OptionsDef.y+LINEHEIGHT*scrnsize + 2,
 		 9,screenSize);
 
-    M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(mousesens+1),
+	M_DrawThermo(OptionsDef.x + 138,OptionsDef.y+LINEHEIGHT*mousesens + 2,
 		 10,mouseSensitivity);
 
     M_WriteText(OptionsDef.x, OptionsDef.y+LINEHEIGHT*configs+2,

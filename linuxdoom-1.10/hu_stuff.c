@@ -556,7 +556,7 @@ void HU_Ticker(void)
 				|| chat_dest[i] == HU_BROADCAST))
 			{
 			    HUlib_addMessageToSText(&w_message,
-						    player_names[i],
+                            player_names[i],
 						    w_inputbuffer[i].l.l);
 			    
 			    message_nottobefuckedwith = true;
@@ -670,7 +670,7 @@ boolean HU_Responder(event_t *ev)
 	}
 	else if (netgame && numplayers > 2)
 	{
-	    for (i=0; i<MAXPLAYERS ; i++)
+        for (i=0; i<MAXPLAYERS ; i++)
 	    {
 		if (ev->data1 == destination_keys[i])
 		{

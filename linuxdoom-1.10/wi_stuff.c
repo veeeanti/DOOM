@@ -1762,10 +1762,10 @@ void WI_unloadData(void)
     //  Z_ChangeTag(star, PU_CACHE);
     //  Z_ChangeTag(bstar, PU_CACHE);
     
-    for (i=0 ; i<MAXPLAYERS ; i++)
+	for (i=0 ; i<MAXPLAYERS ; i++)
 	Z_ChangeTag(p[i], PU_CACHE);
 
-    for (i=0 ; i<MAXPLAYERS ; i++)
+	for (i=0 ; i<MAXPLAYERS ; i++)
 	Z_ChangeTag(bp[i], PU_CACHE);
 }
 

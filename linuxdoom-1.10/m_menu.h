@@ -54,6 +54,9 @@ void M_Init (void);
 // does nothing if menu is already up.
 void M_StartControlPanel (void);
 
+// Opens Steam browser menu at startup when requested by command line.
+void M_OpenSteamBrowserAtStartup(void);
+
 
 
 
