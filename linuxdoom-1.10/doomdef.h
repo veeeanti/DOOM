@@ -93,25 +93,22 @@ typedef enum
 
 
 //
-// For resize of screen, at start of game.
-// It will not work dynamically, see visplanes.
+// Internal rendering resolution.
+// Original DOS/320x200 constraints removed.
+// These can be changed to any resolution that maintains
+// a 16:10 or 4:3 aspect ratio. Higher values improve
+// visual quality but require more CPU for software rendering.
 //
-#define	BASE_WIDTH		320
+// Supported range: 320x200 up to 1920x1200
+// Recommended: 960x600 (3x original, good quality/speed balance)
+//
+#define	BASE_WIDTH		960
 
-// It is educational but futile to change this
-//  scaling e.g. to 2. Drawing of status bar,
-//  menues etc. is tied to the scale implied
-//  by the graphics.
-#define	SCREEN_MUL		1
-#define	INV_ASPECT_RATIO	0.625 // 0.75, ideally
+#define	SCREEN_MUL		2
+#define	INV_ASPECT_RATIO	0.625
 
-// Defines suck. C sucks.
-// C++ might sucks for OOP, but it sure is a better C.
-// So there.
-#define SCREENWIDTH  320
-//SCREEN_MUL*BASE_WIDTH //320
-#define SCREENHEIGHT 200
-//(int)(SCREEN_MUL*BASE_WIDTH*INV_ASPECT_RATIO) //200
+#define SCREENWIDTH  960
+#define SCREENHEIGHT 600
 
 
 
@@ -141,6 +138,7 @@ typedef enum
 #define	MTF_EASY		1
 #define	MTF_NORMAL		2
 #define	MTF_HARD		4
+
 
 // Deaf monsters/do not react to sound.
 #define	MTF_AMBUSH		8

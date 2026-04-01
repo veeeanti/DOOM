@@ -52,7 +52,8 @@
 #define SIL_TOP			2
 #define SIL_BOTH		3
 
-#define MAXDRAWSEGS		256
+// Increased for high-res / large viewport real-time rerendering.
+#define MAXDRAWSEGS		8192
 
 
 
@@ -456,7 +457,7 @@ typedef struct
 
 //
 // Now what is a visplane, anyway?
-// 
+//
 typedef struct
 {
   fixed_t		height;
@@ -464,20 +465,19 @@ typedef struct
   int			lightlevel;
   int			minx;
   int			maxx;
-  
-  // leave pads for [minx-1]/[maxx+1]
-  
-  byte		pad1;
-  // Here lies the rub for all
-  //  dynamic resize/change of resolution.
-  byte		top[SCREENWIDTH];
-  byte		pad2;
-  byte		pad3;
-  // See above.
-  byte		bottom[SCREENWIDTH];
-  byte		pad4;
+
+  // Dynamically allocated arrays sized to SCREENWIDTH.
+  // Allocated at startup in R_InitVisplanes().
+  // Access at [minx-1] and [maxx+1] is safe due to
+  // extra allocation padding.
+  byte*		top;
+  byte*		bottom;
 
 } visplane_t;
+
+// Initialize visplane pool with dynamically allocated arrays.
+// Must be called before any rendering.
+void R_InitVisplanes(void);
 
 
 

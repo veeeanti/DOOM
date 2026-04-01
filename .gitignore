@@ -1,1 +1,3 @@
-linuxdoom-1.10/build-win/*
+linuxdoom-1.10/build/
+build/
+.vscode/

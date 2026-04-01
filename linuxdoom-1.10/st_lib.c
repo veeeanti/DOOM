@@ -229,10 +229,19 @@ STlib_updateMultIcon
 	    w = SHORT(mi->p[mi->oldinum]->width);
 	    h = SHORT(mi->p[mi->oldinum]->height);
 
-	    if (y - ST_Y < 0)
-		I_Error("updateMultIcon: y - ST_Y < 0");
-
-	    V_CopyRect(x, y-ST_Y, BG, w, h, x, y, FG);
+	    {
+		int sy = y - ST_Y;
+		if (sy < 0)
+		{
+		    int hcopy = h + sy;
+		    if (hcopy > 0)
+			V_CopyRect(x, 0, BG, w, hcopy, x, y - sy, FG);
+		}
+		else
+		{
+		    V_CopyRect(x, sy, BG, w, h, x, y, FG);
+		}
+	    }
 	}
 	V_DrawPatch(mi->x, mi->y, FG, mi->p[*mi->inum]);
 	mi->oldinum = *mi->inum;
@@ -278,13 +287,24 @@ STlib_updateBinIcon
 	w = SHORT(bi->p->width);
 	h = SHORT(bi->p->height);
 
-	if (y - ST_Y < 0)
-	    I_Error("updateBinIcon: y - ST_Y < 0");
-
 	if (*bi->val)
+	{
 	    V_DrawPatch(bi->x, bi->y, FG, bi->p);
+	}
 	else
-	    V_CopyRect(x, y-ST_Y, BG, w, h, x, y, FG);
+	{
+	    int sy = y - ST_Y;
+	    if (sy < 0)
+	    {
+		int hcopy = h + sy;
+		if (hcopy > 0)
+		    V_CopyRect(x, 0, BG, w, hcopy, x, y - sy, FG);
+	    }
+	    else
+	    {
+		V_CopyRect(x, sy, BG, w, h, x, y, FG);
+	    }
+	}
 
 	bi->oldval = *bi->val;
     }

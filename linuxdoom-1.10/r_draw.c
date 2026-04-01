@@ -35,6 +35,7 @@ rcsid[] = "$Id: r_draw.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "w_wad.h"
 
 #include "r_local.h"
+#include "st_stuff.h"
 
 // Needs access to LFB (guess what).
 #include "v_video.h"
@@ -45,12 +46,13 @@ rcsid[] = "$Id: r_draw.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include <stdint.h>
 
 
-// ?
-#define MAXWIDTH			1120
-#define MAXHEIGHT			832
+// Maximum rendering dimensions.
+// Must be >= SCREENWIDTH and SCREENHEIGHT.
+#define MAXWIDTH			1920
+#define MAXHEIGHT			1200
 
 // status bar height at bottom of screen
-#define SBARHEIGHT		32
+#define SBARHEIGHT		ST_HEIGHT
 
 //
 // All drawing to the view buffer is accomplished in this file.
@@ -746,7 +748,7 @@ void R_FillBackScreen (void)
 
     char*	name;
 	
-    if (scaledviewwidth == 320)
+    if (scaledviewwidth == SCREENWIDTH)
 	return;
 	
     if ( gamemode == commercial)

@@ -23,7 +23,17 @@
 #ifndef __M_BBOX__
 #define __M_BBOX__
 
+#ifdef _WIN32
+#include <limits.h>
+#ifndef MAXINT
+#define MAXINT INT_MAX
+#endif
+#ifndef MININT
+#define MININT INT_MIN
+#endif
+#else
 #include <values.h>
+#endif
 
 #include "m_fixed.h"
 

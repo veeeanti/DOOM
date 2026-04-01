@@ -39,6 +39,7 @@ static const char rcsid[] = "$Id: r_main.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #include "r_local.h"
 #include "r_sky.h"
+#include "st_stuff.h"
 
 
 
@@ -681,13 +682,20 @@ void R_ExecuteSetViewSize (void)
 
     if (setblocks == 11)
     {
+	// Fullscreen view at high resolutions may trigger visibility artifacts.
+	// Use an in-window size to avoid the stretch/full-screen glyph bug.
+	setblocks = 10;
+    }
+
+    if (setblocks == 11)
+    {
 	scaledviewwidth = SCREENWIDTH;
 	viewheight = SCREENHEIGHT;
     }
     else
     {
-	scaledviewwidth = setblocks*32;
-	viewheight = (setblocks*168/10)&~7;
+	scaledviewwidth = setblocks * SCREENWIDTH / 10;
+	viewheight = (setblocks * (SCREENHEIGHT - ST_HEIGHT) / 10) & ~7;
     }
     
     detailshift = setdetail;

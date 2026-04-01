@@ -49,14 +49,16 @@ planefunction_t		ceilingfunc;
 //
 
 // Here comes the obnoxious "visplane".
-#define MAXVISPLANES	1024
-visplane_t		visplanes[MAXVISPLANES];
+// Modern high-res modes can require more simultaneous planes.
+#define MAXVISPLANES	8192
+static visplane_t	visplane_pool[MAXVISPLANES];
+static byte*		visplane_data;
 visplane_t*		lastvisplane;
 visplane_t*		floorplane;
 visplane_t*		ceilingplane;
 
-// ?
-#define MAXOPENINGS	SCREENWIDTH*64
+// opening - scaled for higher resolutions
+#define MAXOPENINGS	(SCREENWIDTH*128)
 short			openings[MAXOPENINGS];
 short*			lastopening;
 
@@ -95,12 +97,54 @@ fixed_t			cachedystep[SCREENHEIGHT];
 
 
 //
+// R_InitVisplanes
+// Allocate top/bottom arrays for all visplanes in the pool.
+// Must be called after SCREENWIDTH is known.
+//
+void R_InitVisplanes (void)
+{
+    int i;
+    int alloc_size;
+
+    // Each visplane needs viewwidth bytes for top + viewwidth bytes for bottom
+    // Plus 2 extra bytes each for [-1] and [viewwidth] sentinel access
+    int planewidth = (viewwidth > 0 ? viewwidth : SCREENWIDTH);
+    alloc_size = (planewidth + 2) * 2 * MAXVISPLANES;
+
+    if (visplane_data)
+	free(visplane_data);
+
+    visplane_data = (byte*)malloc(alloc_size);
+    if (!visplane_data)
+	I_Error("R_InitVisplanes: failed to allocate %d bytes", alloc_size);
+
+    for (i = 0; i < MAXVISPLANES; i++)
+    {
+	// Offset by 1 so that index [-1] is valid (sentinel access)
+	visplane_pool[i].top = visplane_data + i * (planewidth + 2) * 2 + 1;
+	visplane_pool[i].bottom = visplane_data + i * (planewidth + 2) * 2 + (planewidth + 2) + 1;
+
+	// Ensure clean initial values to avoid stale leftover spans from previous levels.
+	memset(visplane_pool[i].top, 0xff, planewidth);
+	memset(visplane_pool[i].bottom, 0x00, planewidth);
+
+	// Maintain sentinel values outside view range.
+	visplane_pool[i].top[-1] = 0xff;
+	visplane_pool[i].top[planewidth] = 0xff;
+	visplane_pool[i].bottom[-1] = 0x00;
+	visplane_pool[i].bottom[planewidth] = 0x00;
+    }
+}
+
+
+
+//
 // R_InitPlanes
 // Only at game startup.
 //
 void R_InitPlanes (void)
 {
-  // Doh!
+    R_InitVisplanes();
 }
 
 
@@ -130,11 +174,11 @@ R_MapPlane
 	
 #ifdef RANGECHECK
     if (x2 < x1
-	|| x1<0
-	|| x2>=viewwidth
-	|| (unsigned)y>viewheight)
+	|| x1 < 0
+	|| x2 >= viewwidth
+	|| (unsigned)y >= viewheight)
     {
-	I_Error ("R_MapPlane: %i, %i at %i",x1,x2,y);
+	I_Error ("R_MapPlane: %i, %i at %i", x1, x2, y);
     }
 #endif
 
@@ -194,9 +238,16 @@ void R_ClearPlanes (void)
 	ceilingclip[i] = -1;
     }
 
-    lastvisplane = visplanes;
+    lastvisplane = visplane_pool;
     lastopening = openings;
-    
+
+    // span start/stop initialization for each frame
+    for (i = 0; i < viewheight; i++)
+    {
+	spanstart[i] = 0;
+	spanstop[i] = 0;
+    }
+
     // texture calculation
     memset (cachedheight, 0, sizeof(cachedheight));
 
@@ -228,7 +279,7 @@ R_FindPlane
 	lightlevel = 0;
     }
 	
-    for (check=visplanes; check<lastvisplane; check++)
+    for (check=visplane_pool; check<lastvisplane; check++)
     {
 	if (height == check->height
 	    && picnum == check->picnum
@@ -241,20 +292,29 @@ R_FindPlane
 			
     if (check < lastvisplane)
 	return check;
-		
-    if (lastvisplane - visplanes == MAXVISPLANES)
-	I_Error ("R_FindPlane: no more visplanes");
-		
-    lastvisplane++;
+	
+    if (lastvisplane - visplane_pool >= MAXVISPLANES)
+    {
+	// High-res scenes can exceed old pool sizes. Reuse the first plane as a fallback.
+	check = visplane_pool;
+    }
+    else
+    {
+	lastvisplane++;
+    }
 
     check->height = height;
     check->picnum = picnum;
     check->lightlevel = lightlevel;
     check->minx = SCREENWIDTH;
     check->maxx = -1;
-    
-    memset (check->top,0xff,sizeof(check->top));
-		
+
+    {
+	int planewidth = (viewwidth > 0 ? viewwidth : SCREENWIDTH);
+	memset (check->top, 0xff, planewidth);
+	memset (check->bottom, 0x00, planewidth);
+    }
+	
     return check;
 }
 
@@ -318,8 +378,12 @@ R_CheckPlane
     pl->minx = start;
     pl->maxx = stop;
 
-    memset (pl->top,0xff,sizeof(pl->top));
-		
+    {
+	int planewidth = (viewwidth > 0 ? viewwidth : SCREENWIDTH);
+	memset (pl->top, 0xff, planewidth);
+	memset (pl->bottom, 0x00, planewidth);
+    }
+	
     return pl;
 }
 
@@ -377,16 +441,16 @@ void R_DrawPlanes (void)
 	I_Error ("R_DrawPlanes: drawsegs overflow (%i)",
 		 ds_p - drawsegs);
     
-    if (lastvisplane - visplanes > MAXVISPLANES)
+    if (lastvisplane - visplane_pool >= MAXVISPLANES)
 	I_Error ("R_DrawPlanes: visplane overflow (%i)",
-		 lastvisplane - visplanes);
+		 lastvisplane - visplane_pool);
     
-    if (lastopening - openings > MAXOPENINGS)
+    if (lastopening - openings >= MAXOPENINGS)
 	I_Error ("R_DrawPlanes: opening overflow (%i)",
 		 lastopening - openings);
 #endif
 
-    for (pl = visplanes ; pl < lastvisplane ; pl++)
+    for (pl = visplane_pool ; pl < lastvisplane ; pl++)
     {
 	if (pl->minx > pl->maxx)
 	    continue;

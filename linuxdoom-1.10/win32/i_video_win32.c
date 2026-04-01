@@ -1,10 +1,12 @@
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #undef boolean
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -16,13 +18,12 @@
 
 static HWND s_hwnd;
 static HDC s_hdc;
+static HDC s_memdc;
+static HBITMAP s_bitmap;
+static HBITMAP s_oldbitmap;
 static BITMAPINFO s_bmi;
+static unsigned int *s_framebuffer = NULL;
 static unsigned int s_palette[256];
-static unsigned int s_pixels[SCREENWIDTH * SCREENHEIGHT];
-static unsigned int *s_pixels_scaled = NULL;
-static int s_scaled_width;
-static int s_scaled_height;
-static int s_multiply = 2;
 static int s_initialized;
 static int s_grabmouse;
 static int s_rawinput;
@@ -32,23 +33,12 @@ static int s_ignore_mousemove;
 static int s_fullscreen;
 static RECT s_windowed_rect;
 static DWORD s_windowed_style;
+static int s_display_w;
+static int s_display_h;
+static int s_vsync;
+static double s_refresh_rate;
 
 static void set_mouse_capture(HWND hwnd, int capture);
-
-// Nearest-neighbor upscaling of framebuffer
-static void scale_pixels_nearest_neighbor(void)
-{
-    int x, y, px, py;
-    for (y = 0; y < s_scaled_height; ++y)
-    {
-        for (x = 0; x < s_scaled_width; ++x)
-        {
-            px = x / s_multiply;  // Source pixel x
-            py = y / s_multiply;  // Source pixel y
-            s_pixels_scaled[y * s_scaled_width + x] = s_pixels[py * SCREENWIDTH + px];
-        }
-    }
-}
 
 static void center_mouse_cursor(HWND hwnd, int clip)
 {
@@ -88,12 +78,15 @@ static void apply_fullscreen_state(void)
         mi.cbSize = sizeof(mi);
         GetMonitorInfo(MonitorFromWindow(s_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
 
+        s_display_w = mi.rcMonitor.right - mi.rcMonitor.left;
+        s_display_h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+
         SetWindowPos(s_hwnd,
                      HWND_TOP,
                      mi.rcMonitor.left,
                      mi.rcMonitor.top,
-                     mi.rcMonitor.right - mi.rcMonitor.left,
-                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     s_display_w,
+                     s_display_h,
                      SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
     else
@@ -106,6 +99,13 @@ static void apply_fullscreen_state(void)
                      s_windowed_rect.right - s_windowed_rect.left,
                      s_windowed_rect.bottom - s_windowed_rect.top,
                      SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+
+        {
+            RECT rc;
+            GetClientRect(s_hwnd, &rc);
+            s_display_w = rc.right - rc.left;
+            s_display_h = rc.bottom - rc.top;
+        }
     }
 
     if (s_grabmouse)
@@ -219,7 +219,6 @@ static void set_mouse_capture(HWND hwnd, int capture)
     if (capture)
     {
         RECT clip;
-        POINT center;
 
         if (s_mousecaptured)
             return;
@@ -234,14 +233,9 @@ static void set_mouse_capture(HWND hwnd, int capture)
         }
 
         GetClientRect(hwnd, &clip);
-        center.x = (clip.left + clip.right) / 2;
-        center.y = (clip.top + clip.bottom) / 2;
-
         MapWindowPoints(hwnd, NULL, (POINT *)&clip, 2);
-        ClientToScreen(hwnd, &center);
         ClipCursor(&clip);
-        SetCursorPos(center.x, center.y);
-        s_ignore_mousemove = 1;
+        center_mouse_cursor(hwnd, 1);
 
         s_mousecaptured = 1;
     }
@@ -402,14 +396,16 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             return 0;
         }
 
-        int x = GET_X_LPARAM(lparam);
-        int y = GET_Y_LPARAM(lparam);
-        int dx = x - last_x;
-        int dy = y - last_y;
-        last_x = x;
-        last_y = y;
-        if (dx || dy)
-            post_mouse_event(current_mouse_buttons(), dx << 2, -dy << 2);
+        {
+            int x = GET_X_LPARAM(lparam);
+            int y = GET_Y_LPARAM(lparam);
+            int dx = x - last_x;
+            int dy = y - last_y;
+            last_x = x;
+            last_y = y;
+            if (dx || dy)
+                post_mouse_event(current_mouse_buttons(), dx << 2, -dy << 2);
+        }
         return 0;
     }
 
@@ -431,6 +427,46 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     case WM_RBUTTONUP:
         post_mouse_event(current_mouse_buttons(), 0, 0);
         return 0;
+
+    case WM_SIZING:
+    {
+        RECT *rc = (RECT *)lparam;
+        int client_w = rc->right - rc->left;
+        int client_h = rc->bottom - rc->top;
+        int border_cx = GetSystemMetrics(SM_CXSIZEFRAME) * 2;
+        int border_cy = GetSystemMetrics(SM_CYSIZEFRAME) * 2 +
+                        GetSystemMetrics(SM_CYCAPTION);
+        int inner_w = client_w;
+        int inner_h = client_h;
+        int target_h;
+        int wpos = (int)wparam;
+
+        if (inner_w < SCREENWIDTH)
+            inner_w = SCREENWIDTH;
+        target_h = inner_w * SCREENHEIGHT / SCREENWIDTH;
+
+        if (wpos == WMSZ_LEFT || wpos == WMSZ_RIGHT ||
+            wpos == WMSZ_TOPLEFT || wpos == WMSZ_TOPRIGHT ||
+            wpos == WMSZ_BOTTOMLEFT || wpos == WMSZ_BOTTOMRIGHT)
+        {
+            rc->bottom = rc->top + target_h + border_cy;
+        }
+        else
+        {
+            int target_w = inner_h * SCREENWIDTH / SCREENHEIGHT;
+            rc->right = rc->left + target_w + border_cx;
+        }
+        return TRUE;
+    }
+
+    case WM_SIZE:
+    {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        s_display_w = rc.right - rc.left;
+        s_display_h = rc.bottom - rc.top;
+        return 0;
+    }
 
     default:
         break;
@@ -465,9 +501,10 @@ void I_FinishUpdate(void)
 {
     int i;
     static int lasttic;
-    RECT rect;
-    int dst_w;
-    int dst_h;
+    int dst_x, dst_y, dst_w, dst_h;
+    float src_aspect;
+    float dst_aspect;
+    float scale;
 
     if (!s_initialized)
         return;
@@ -487,31 +524,41 @@ void I_FinishUpdate(void)
     }
 
     for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; ++i)
-        s_pixels[i] = s_palette[screens[0][i]];
+        s_framebuffer[i] = s_palette[screens[0][i]];
 
-    // Scale pixels using nearest-neighbor interpolation
-    scale_pixels_nearest_neighbor();
+    src_aspect = (float)SCREENWIDTH / (float)SCREENHEIGHT;
+    dst_aspect = (float)s_display_w / (float)s_display_h;
 
-    GetClientRect(s_hwnd, &rect);
-    dst_w = rect.right - rect.left;
-    dst_h = rect.bottom - rect.top;
+    if (dst_aspect > src_aspect)
+    {
+        dst_h = s_display_h;
+        dst_w = (int)(dst_h * src_aspect);
+        dst_x = (s_display_w - dst_w) / 2;
+        dst_y = 0;
+    }
+    else
+    {
+        dst_w = s_display_w;
+        dst_h = (int)(dst_w / src_aspect);
+        dst_x = 0;
+        dst_y = (s_display_h - dst_h) / 2;
+    }
 
-    // Use nearest-neighbor scaling for crisp pixel-art rendering
-    SetStretchBltMode(s_hdc, COLORONCOLOR);
+    SetStretchBltMode(s_hdc, HALFTONE);
+    SetBrushOrgEx(s_hdc, 0, 0, NULL);
 
     StretchDIBits(s_hdc,
-                  0,
-                  0,
-                  dst_w,
-                  dst_h,
-                  0,
-                  0,
-                  s_scaled_width,
-                  s_scaled_height,
-                  s_pixels_scaled,
+                  dst_x, dst_y, dst_w, dst_h,
+                  0, 0, SCREENWIDTH, SCREENHEIGHT,
+                  s_framebuffer,
                   &s_bmi,
                   DIB_RGB_COLORS,
                   SRCCOPY);
+
+    if (s_vsync)
+    {
+        DwmFlush();
+    }
 }
 
 void I_ReadScreen(byte *scr)
@@ -535,6 +582,24 @@ void I_ShutdownGraphics(void)
 {
     set_mouse_capture(s_hwnd, 0);
 
+    if (s_memdc && s_oldbitmap)
+    {
+        SelectObject(s_memdc, s_oldbitmap);
+        s_oldbitmap = NULL;
+    }
+
+    if (s_bitmap)
+    {
+        DeleteObject(s_bitmap);
+        s_bitmap = NULL;
+    }
+
+    if (s_memdc)
+    {
+        DeleteDC(s_memdc);
+        s_memdc = NULL;
+    }
+
     if (s_hdc)
     {
         ReleaseDC(s_hwnd, s_hdc);
@@ -547,10 +612,10 @@ void I_ShutdownGraphics(void)
         s_hwnd = NULL;
     }
 
-    if (s_pixels_scaled)
+    if (s_framebuffer)
     {
-        free(s_pixels_scaled);
-        s_pixels_scaled = NULL;
+        free(s_framebuffer);
+        s_framebuffer = NULL;
     }
 
     s_initialized = 0;
@@ -575,34 +640,47 @@ void I_InitGraphics(void)
     RECT rect;
     int window_w;
     int window_h;
+    int default_multiply;
+    int multiply;
+    DEVMODE dm;
 
     if (!firsttime)
         return;
     firsttime = 0;
 
     if (M_CheckParm("-1"))
-        s_multiply = 1;
-    if (M_CheckParm("-2"))
-        s_multiply = 2;
-    if (M_CheckParm("-3"))
-        s_multiply = 3;
-    if (M_CheckParm("-4"))
-        s_multiply = 4;
+        default_multiply = 1;
+    else if (M_CheckParm("-3"))
+        default_multiply = 3;
+    else if (M_CheckParm("-4"))
+        default_multiply = 4;
+    else
+        default_multiply = 2;
+
+    multiply = default_multiply;
 
     s_fullscreen = M_CheckParm("-fullscreen") && !M_CheckParm("-windowed");
+    s_vsync = !M_CheckParm("-novsync");
+
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &dm))
+        s_refresh_rate = (double)dm.dmDisplayFrequency;
+    else
+        s_refresh_rate = 60.0;
 
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = DoomWndProc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.lpszClassName = "WinDoomClass";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
 
     if (!RegisterClass(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         I_Error("RegisterClass failed");
 
-    style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    window_w = SCREENWIDTH * s_multiply;
-    window_h = SCREENHEIGHT * s_multiply;
+    style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_SIZEBOX;
+    window_w = SCREENWIDTH * multiply;
+    window_h = SCREENHEIGHT * multiply;
     rect.left = 0;
     rect.top = 0;
     rect.right = window_w;
@@ -629,27 +707,31 @@ void I_InitGraphics(void)
     s_windowed_style = style;
     GetWindowRect(s_hwnd, &s_windowed_rect);
 
-    if (s_fullscreen)
-        apply_fullscreen_state();
-
     s_hdc = GetDC(s_hwnd);
     if (!s_hdc)
         I_Error("GetDC failed");
 
-    // Allocate scaled framebuffer
-    s_scaled_width = SCREENWIDTH * s_multiply;
-    s_scaled_height = SCREENHEIGHT * s_multiply;
-    s_pixels_scaled = malloc(s_scaled_width * s_scaled_height * sizeof(unsigned int));
-    if (!s_pixels_scaled)
-        I_Error("malloc failed for scaled framebuffer");
+    s_framebuffer = (unsigned int *)malloc(SCREENWIDTH * SCREENHEIGHT * sizeof(unsigned int));
+    if (!s_framebuffer)
+        I_Error("malloc failed for framebuffer (%dx%d)", SCREENWIDTH, SCREENHEIGHT);
 
     memset(&s_bmi, 0, sizeof(s_bmi));
     s_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    s_bmi.bmiHeader.biWidth = s_scaled_width;
-    s_bmi.bmiHeader.biHeight = -s_scaled_height;
+    s_bmi.bmiHeader.biWidth = SCREENWIDTH;
+    s_bmi.bmiHeader.biHeight = -SCREENHEIGHT;
     s_bmi.bmiHeader.biPlanes = 1;
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;
+
+    {
+        RECT rc;
+        GetClientRect(s_hwnd, &rc);
+        s_display_w = rc.right - rc.left;
+        s_display_h = rc.bottom - rc.top;
+    }
+
+    if (s_fullscreen)
+        apply_fullscreen_state();
 
     {
         RAWINPUTDEVICE raw_device;
@@ -665,6 +747,11 @@ void I_InitGraphics(void)
 
     if (s_grabmouse)
         set_mouse_capture(s_hwnd, 1);
+
+    fprintf(stderr, "Video: %dx%d internal, %s, %s\n",
+            SCREENWIDTH, SCREENHEIGHT,
+            s_fullscreen ? "fullscreen" : "windowed",
+            s_vsync ? "vsync on" : "vsync off");
 
     s_initialized = 1;
 }
