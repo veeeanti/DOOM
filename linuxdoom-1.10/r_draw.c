@@ -48,8 +48,8 @@ rcsid[] = "$Id: r_draw.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 
 // Maximum rendering dimensions.
 // Must be >= SCREENWIDTH and SCREENHEIGHT.
-#define MAXWIDTH			1920
-#define MAXHEIGHT			1200
+#define MAXWIDTH			1360
+#define MAXHEIGHT			768
 
 // status bar height at bottom of screen
 #define SBARHEIGHT		ST_HEIGHT
@@ -261,25 +261,29 @@ void R_DrawColumnLow (void)
 // Spectre/Invisibility.
 //
 #define FUZZTABLE		50 
-#define FUZZOFF	(SCREENWIDTH)
 
-
-int	fuzzoffset[FUZZTABLE] =
+static const int fuzzpattern[FUZZTABLE] =
 {
-    FUZZOFF,-FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,
-    FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,
-    FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,
-    FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,
-    FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,
-    FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,
-    FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF 
-}; 
+    1,-1,1,-1,1,1,-1,
+    1,1,-1,1,1,1,-1,
+    1,1,1,-1,-1,-1,-1,
+    1,-1,-1,1,1,1,1,-1,
+    1,-1,1,1,-1,-1,1,
+    1,-1,-1,-1,-1,1,1,
+    1,1,-1,1,1,-1,1
+};
 
-int	fuzzpos = 0; 
+int	fuzzoffset[FUZZTABLE];
+int	fuzzpos = 0;
 
-
-//
-// Framebuffer postprocessing.
+void R_InitFuzzOffset(void)
+{
+    int i;
+    for (i = 0; i < FUZZTABLE; i++)
+    {
+        fuzzoffset[i] = fuzzpattern[i] * SCREENWIDTH;
+    }
+}
 // Creates a fuzzy image by copying pixels
 //  from adjacent ones to left and right.
 // Used with an all black colormap, this

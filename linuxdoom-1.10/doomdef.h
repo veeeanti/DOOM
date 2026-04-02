@@ -104,11 +104,15 @@ typedef enum
 //
 #define	BASE_WIDTH		960
 
-#define	SCREEN_MUL		2
+#define	SCREEN_MUL		1
 #define	INV_ASPECT_RATIO	0.625
 
-#define SCREENWIDTH  960
-#define SCREENHEIGHT 600
+#define DEFAULT_WIDTH   960
+#define DEFAULT_HEIGHT  600
+#define MAX_SCREENWIDTH  1360
+#define MAX_SCREENHEIGHT 768
+extern int SCREENWIDTH;
+extern int SCREENHEIGHT;
 
 
 

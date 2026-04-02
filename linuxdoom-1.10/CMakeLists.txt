@@ -46,8 +46,10 @@ set(DOOM_CORE_SOURCES
     r_bsp.c
     r_data.c
     r_draw.c
+    r_dynamic.c
     r_main.c
     r_plane.c
+    r_resolution.c
     r_segs.c
     r_sky.c
     r_things.c
@@ -58,6 +60,7 @@ set(DOOM_CORE_SOURCES
     tables.c
     v_video.c
     w_wad.c
+    wad_compat.c
     wi_stuff.c
     z_zone.c
     i_main.c
@@ -107,5 +110,5 @@ else()
     target_compile_definitions(linuxxdoom PRIVATE NORMALUNIX LINUX)
     find_package(X11 REQUIRED)
     target_include_directories(linuxxdoom PRIVATE ${X11_INCLUDE_DIR})
-    target_link_libraries(linuxxdoom PRIVATE ${X11_X11_LIB} ${X11_Xext_LIB} m)
+    target_link_libraries(linuxxdoom PRIVATE ${X11_X11_LIB} ${X11_Xext_LIB})
 endif()

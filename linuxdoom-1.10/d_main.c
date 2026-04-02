@@ -86,6 +86,8 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "p_setup.h"
 #include "r_local.h"
 
+#include "r_resolution.h"
+#include "wad_compat.h"
 
 #include "d_main.h"
 
@@ -375,7 +377,8 @@ void D_DoomLoop (void)
 	printf ("debug output to: %s\n",filename);
 	debugfile = fopen (filename,"w");
     }
-	
+	R_InitResolution();
+	WAD_InitCompatibility();
     I_InitGraphics ();
 
     while (1)

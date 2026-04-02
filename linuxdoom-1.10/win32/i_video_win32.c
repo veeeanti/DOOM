@@ -15,6 +15,7 @@
 #include "i_video.h"
 #include "m_argv.h"
 #include "v_video.h"
+#include "r_resolution.h"
 
 static HWND s_hwnd;
 static HDC s_hdc;
@@ -121,64 +122,122 @@ static int translate_key(WPARAM vk)
 
     switch (vk)
     {
-    case VK_SPACE: return ' ';
-    case VK_LEFT: return KEY_LEFTARROW;
-    case VK_RIGHT: return KEY_RIGHTARROW;
-    case VK_UP: return KEY_UPARROW;
-    case VK_DOWN: return KEY_DOWNARROW;
-    case VK_ESCAPE: return KEY_ESCAPE;
-    case VK_RETURN: return KEY_ENTER;
-    case VK_TAB: return KEY_TAB;
-    case VK_F1: return KEY_F1;
-    case VK_F2: return KEY_F2;
-    case VK_F3: return KEY_F3;
-    case VK_F4: return KEY_F4;
-    case VK_F5: return KEY_F5;
-    case VK_F6: return KEY_F6;
-    case VK_F7: return KEY_F7;
-    case VK_F8: return KEY_F8;
-    case VK_F9: return KEY_F9;
-    case VK_F10: return KEY_F10;
-    case VK_F11: return KEY_F11;
-    case VK_F12: return KEY_F12;
-    case VK_BACK: return KEY_BACKSPACE;
-    case VK_PAUSE: return KEY_PAUSE;
-    case VK_NUMPAD0: return '0';
-    case VK_NUMPAD1: return '1';
-    case VK_NUMPAD2: return '2';
-    case VK_NUMPAD3: return '3';
-    case VK_NUMPAD4: return '4';
-    case VK_NUMPAD5: return '5';
-    case VK_NUMPAD6: return '6';
-    case VK_NUMPAD7: return '7';
-    case VK_NUMPAD8: return '8';
-    case VK_NUMPAD9: return '9';
-    case VK_MULTIPLY: return '*';
-    case VK_ADD: return '+';
-    case VK_SUBTRACT: return KEY_MINUS;
-    case VK_DECIMAL: return '.';
-    case VK_DIVIDE: return '/';
-    case VK_OEM_PLUS: return KEY_EQUALS;
-    case VK_OEM_MINUS: return KEY_MINUS;
-    case VK_OEM_1: return ';';
-    case VK_OEM_2: return '/';
-    case VK_OEM_3: return '`';
-    case VK_OEM_4: return '[';
-    case VK_OEM_5: return '\\';
-    case VK_OEM_6: return ']';
-    case VK_OEM_7: return '\'';
-    case VK_OEM_COMMA: return ',';
-    case VK_OEM_PERIOD: return '.';
-    case VK_OEM_102: return '\\';
-    case VK_SHIFT: return KEY_RSHIFT;
-    case VK_RSHIFT: return KEY_RSHIFT;
-    case VK_LSHIFT: return KEY_RSHIFT;
-    case VK_CONTROL: return KEY_RCTRL;
-    case VK_RCONTROL: return KEY_RCTRL;
-    case VK_LCONTROL: return KEY_RCTRL;
-    case VK_MENU: return KEY_RALT;
-    case VK_RMENU: return KEY_RALT;
-    case VK_LMENU: return KEY_RALT;
+    case VK_SPACE:
+        return ' ';
+    case VK_LEFT:
+        return KEY_LEFTARROW;
+    case VK_RIGHT:
+        return KEY_RIGHTARROW;
+    case VK_UP:
+        return KEY_UPARROW;
+    case VK_DOWN:
+        return KEY_DOWNARROW;
+    case VK_ESCAPE:
+        return KEY_ESCAPE;
+    case VK_RETURN:
+        return KEY_ENTER;
+    case VK_TAB:
+        return KEY_TAB;
+    case VK_F1:
+        return KEY_F1;
+    case VK_F2:
+        return KEY_F2;
+    case VK_F3:
+        return KEY_F3;
+    case VK_F4:
+        return KEY_F4;
+    case VK_F5:
+        return KEY_F5;
+    case VK_F6:
+        return KEY_F6;
+    case VK_F7:
+        return KEY_F7;
+    case VK_F8:
+        return KEY_F8;
+    case VK_F9:
+        return KEY_F9;
+    case VK_F10:
+        return KEY_F10;
+    case VK_F11:
+        return KEY_F11;
+    case VK_F12:
+        return KEY_F12;
+    case VK_BACK:
+        return KEY_BACKSPACE;
+    case VK_PAUSE:
+        return KEY_PAUSE;
+    case VK_NUMPAD0:
+        return '0';
+    case VK_NUMPAD1:
+        return '1';
+    case VK_NUMPAD2:
+        return '2';
+    case VK_NUMPAD3:
+        return '3';
+    case VK_NUMPAD4:
+        return '4';
+    case VK_NUMPAD5:
+        return '5';
+    case VK_NUMPAD6:
+        return '6';
+    case VK_NUMPAD7:
+        return '7';
+    case VK_NUMPAD8:
+        return '8';
+    case VK_NUMPAD9:
+        return '9';
+    case VK_MULTIPLY:
+        return '*';
+    case VK_ADD:
+        return '+';
+    case VK_SUBTRACT:
+        return KEY_MINUS;
+    case VK_DECIMAL:
+        return '.';
+    case VK_DIVIDE:
+        return '/';
+    case VK_OEM_PLUS:
+        return KEY_EQUALS;
+    case VK_OEM_MINUS:
+        return KEY_MINUS;
+    case VK_OEM_1:
+        return ';';
+    case VK_OEM_2:
+        return '/';
+    case VK_OEM_3:
+        return '`';
+    case VK_OEM_4:
+        return '[';
+    case VK_OEM_5:
+        return '\\';
+    case VK_OEM_6:
+        return ']';
+    case VK_OEM_7:
+        return '\'';
+    case VK_OEM_COMMA:
+        return ',';
+    case VK_OEM_PERIOD:
+        return '.';
+    case VK_OEM_102:
+        return '\\';
+    case VK_SHIFT:
+        return KEY_RSHIFT;
+    case VK_RSHIFT:
+        return KEY_RSHIFT;
+    case VK_LSHIFT:
+        return KEY_RSHIFT;
+    case VK_CONTROL:
+        return KEY_RCTRL;
+    case VK_RCONTROL:
+        return KEY_RCTRL;
+    case VK_LCONTROL:
+        return KEY_RCTRL;
+    case VK_MENU:
+        return KEY_RALT;
+    case VK_RMENU:
+        return KEY_RALT;
+    case VK_LMENU:
+        return KEY_RALT;
     default:
         break;
     }
@@ -328,8 +387,7 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
-        if ((wparam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
-            || wparam == VK_F11)
+        if ((wparam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000)) || wparam == VK_F11)
         {
             I_ToggleFullscreen();
             return 0;
@@ -544,8 +602,25 @@ void I_FinishUpdate(void)
         dst_y = (s_display_h - dst_h) / 2;
     }
 
+    // Use HALFTONE for better quality scaling
     SetStretchBltMode(s_hdc, HALFTONE);
     SetBrushOrgEx(s_hdc, 0, 0, NULL);
+
+    // Fill black bars if aspect ratio doesn't match
+    if (dst_x > 0)
+    {
+        RECT left_bar = {0, 0, dst_x, s_display_h};
+        FillRect(s_hdc, &left_bar, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        RECT right_bar = {dst_x + dst_w, 0, s_display_w, s_display_h};
+        FillRect(s_hdc, &right_bar, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    }
+    if (dst_y > 0)
+    {
+        RECT top_bar = {0, 0, s_display_w, dst_y};
+        FillRect(s_hdc, &top_bar, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        RECT bottom_bar = {0, dst_y + dst_h, s_display_w, s_display_h};
+        FillRect(s_hdc, &bottom_bar, (HBRUSH)GetStockObject(BLACK_BRUSH));
+    }
 
     StretchDIBits(s_hdc,
                   dst_x, dst_y, dst_w, dst_h,
@@ -655,7 +730,7 @@ void I_InitGraphics(void)
     else if (M_CheckParm("-4"))
         default_multiply = 4;
     else
-        default_multiply = 2;
+        default_multiply = 1;
 
     multiply = default_multiply;
 

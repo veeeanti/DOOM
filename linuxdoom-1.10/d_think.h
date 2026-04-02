@@ -38,9 +38,13 @@
 //  we will need to handle the various
 //  action functions cleanly.
 //
+// Use old-style unspecified-parameter function pointers for broader compatibility
+// with existing action function signatures in this code base.
+// (This avoids C4113 style mismatches in actions table initializers.)
+//
 typedef  void (*actionf_v)();
-typedef  void (*actionf_p1)( void* );
-typedef  void (*actionf_p2)( void*, void* );
+typedef  void (*actionf_p1)();
+typedef  void (*actionf_p2)();
 
 typedef union
 {

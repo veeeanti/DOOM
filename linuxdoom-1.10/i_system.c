@@ -44,6 +44,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #pragma implementation "i_system.h"
 #endif
 #include "i_system.h"
+#include "wad_compat.h"
 
 
 
@@ -73,10 +74,10 @@ int  I_GetHeapSize (void)
     return mb_used*1024*1024;
 }
 
-byte* I_ZoneBase (int*	size)
+void* I_ZoneBase (int* size)
 {
-    *size = mb_used*1024*1024;
-    return (byte *) malloc (*size);
+    *size = zone_memory_mb * 1024 * 1024;
+    return malloc(*size);
 }
 
 

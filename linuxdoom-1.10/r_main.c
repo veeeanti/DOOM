@@ -41,7 +41,7 @@ static const char rcsid[] = "$Id: r_main.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 #include "r_sky.h"
 #include "st_stuff.h"
 
-
+#include "r_dynamic.h"
 
 
 
@@ -101,7 +101,7 @@ int			viewangletox[FINEANGLES/2];
 // The xtoviewangleangle[] table maps a screen pixel
 // to the lowest viewangle that maps back to x ranges
 // from clipangle to -clipangle.
-angle_t			xtoviewangle[SCREENWIDTH+1];
+angle_t		xtoviewangle[MAX_SCREENWIDTH+1];
 
 
 // UNUSED.
@@ -776,10 +776,13 @@ void R_ExecuteSetViewSize (void)
 extern int	detailLevel;
 extern int	screenblocks;
 
+void R_InitFuzzOffset (void);
 
 
 void R_Init (void)
 {
+    R_InitDynamicArrays();
+    R_InitFuzzOffset();
     R_InitData ();
     printf ("\nR_InitData");
     R_InitPointToAngle ();

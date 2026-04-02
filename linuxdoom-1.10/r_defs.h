@@ -37,6 +37,7 @@
 // SECTORS do store MObjs anyway.
 #include "p_mobj.h"
 
+#include "wad_compat.h"
 
 
 #ifdef __GNUG__
@@ -53,8 +54,9 @@
 #define SIL_BOTH		3
 
 // Increased for high-res / large viewport real-time rerendering.
-#define MAXDRAWSEGS		8192
-
+#define MAXVISPLANES    MAX_VISPLANES
+#define MAXDRAWSEGS     MAX_DRAWSEGS
+#define MAXVISSPRITES   MAX_VISSPRITES
 
 
 
