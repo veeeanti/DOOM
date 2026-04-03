@@ -2,9 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(linuxdoom VERSION 1.10.0 LANGUAGES C CXX)
 
-option(DOOM_ENABLE_STEAMWORKS "Enable Steamworks transport integration" OFF)
 option(DOOM_ENABLE_DISCORD_RPC "Enable Discord Rich Presence integration" ON)
-set(STEAMWORKS_SDK_PATH "" CACHE PATH "Path to Steamworks SDK root")
 
 set(DOOM_CORE_SOURCES
     am_map.c
@@ -75,7 +73,6 @@ if(WIN32)
     )
 
     set(DOOM_PLATFORM_SOURCES
-        win32/steam_transport.cpp
         win32/i_video_win32.c
         win32/i_system_win32.c
         win32/i_sound_win32.c
@@ -91,14 +88,6 @@ else()
         i_sound.c
         i_net.c
     )
-
-    if(DOOM_ENABLE_STEAMWORKS)
-        list(REMOVE_ITEM DOOM_PLATFORM_SOURCES i_net.c)
-        list(APPEND DOOM_PLATFORM_SOURCES
-            win32/steam_transport.cpp
-            win32/i_net_stub.c
-        )
-    endif()
 endif()
 
 if(DOOM_ENABLE_DISCORD_RPC)
@@ -110,16 +99,11 @@ add_executable(linuxxdoom
     ${DOOM_PLATFORM_SOURCES}
 )
 
-if(WIN32)
-    add_executable(doom_launcher WIN32 win32/doom_launcher.c)
-endif()
-
 target_include_directories(linuxxdoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
     set_target_properties(linuxxdoom PROPERTIES OUTPUT_NAME doom)
     set_target_properties(linuxxdoom PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
-    set_target_properties(doom_launcher PROPERTIES OUTPUT_NAME doom-launcher)
 
     if(MSVC)
         target_link_options(linuxxdoom PRIVATE
@@ -134,79 +118,16 @@ if(WIN32)
     target_compile_definitions(linuxxdoom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32 R_OK=4)
     target_compile_definitions(linuxxdoom PRIVATE strcasecmp=_stricmp strncasecmp=_strnicmp)
     target_link_libraries(linuxxdoom PRIVATE winmm)
-    target_compile_definitions(doom_launcher PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
 
     if(DOOM_ENABLE_DISCORD_RPC)
         target_compile_definitions(linuxxdoom PRIVATE DOOM_ENABLE_DISCORD_RPC=1)
     endif()
 
-    if(DOOM_ENABLE_STEAMWORKS)
-        target_compile_definitions(linuxxdoom PRIVATE DOOM_ENABLE_STEAMWORKS=1)
-
-        if(NOT STEAMWORKS_SDK_PATH)
-            message(FATAL_ERROR "DOOM_ENABLE_STEAMWORKS=ON requires STEAMWORKS_SDK_PATH to be set")
-        endif()
-
-        target_include_directories(linuxxdoom PRIVATE ${STEAMWORKS_SDK_PATH}/public)
-
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(STEAMWORKS_LIB ${STEAMWORKS_SDK_PATH}/redistributable_bin/win64/steam_api64.lib)
-            set(STEAMWORKS_DLL ${STEAMWORKS_SDK_PATH}/redistributable_bin/win64/steam_api64.dll)
-        else()
-            set(STEAMWORKS_LIB ${STEAMWORKS_SDK_PATH}/redistributable_bin/steam_api.lib)
-            set(STEAMWORKS_DLL ${STEAMWORKS_SDK_PATH}/redistributable_bin/steam_api.dll)
-        endif()
-
-        if(NOT EXISTS ${STEAMWORKS_LIB})
-            message(FATAL_ERROR "Steamworks import library not found: ${STEAMWORKS_LIB}")
-        endif()
-
-        target_link_libraries(linuxxdoom PRIVATE ${STEAMWORKS_LIB})
-
-        if(EXISTS ${STEAMWORKS_DLL})
-            add_custom_command(TARGET linuxxdoom POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${STEAMWORKS_DLL}
-                    $<TARGET_FILE_DIR:linuxxdoom>
-            )
-        else()
-            message(WARNING "Steamworks runtime DLL not found: ${STEAMWORKS_DLL}")
-        endif()
-    endif()
 else()
     target_compile_definitions(linuxxdoom PRIVATE NORMALUNIX LINUX)
 
     if(DOOM_ENABLE_DISCORD_RPC)
         target_compile_definitions(linuxxdoom PRIVATE DOOM_ENABLE_DISCORD_RPC=1)
-    endif()
-
-    if(DOOM_ENABLE_STEAMWORKS)
-        target_compile_definitions(linuxxdoom PRIVATE DOOM_ENABLE_STEAMWORKS=1)
-
-        if(NOT STEAMWORKS_SDK_PATH)
-            message(FATAL_ERROR "DOOM_ENABLE_STEAMWORKS=ON requires STEAMWORKS_SDK_PATH to be set")
-        endif()
-
-        target_include_directories(linuxxdoom PRIVATE ${STEAMWORKS_SDK_PATH}/public)
-
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(STEAMWORKS_LIB ${STEAMWORKS_SDK_PATH}/redistributable_bin/linux64/libsteam_api.so)
-        else()
-            set(STEAMWORKS_LIB ${STEAMWORKS_SDK_PATH}/redistributable_bin/linux32/libsteam_api.so)
-        endif()
-
-        if(NOT EXISTS ${STEAMWORKS_LIB})
-            message(FATAL_ERROR "Steamworks shared library not found: ${STEAMWORKS_LIB}")
-        endif()
-
-        target_link_libraries(linuxxdoom PRIVATE ${STEAMWORKS_LIB})
-        target_link_options(linuxxdoom PRIVATE "-Wl,-rpath,$ORIGIN")
-
-        add_custom_command(TARGET linuxxdoom POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${STEAMWORKS_LIB}
-                $<TARGET_FILE_DIR:linuxxdoom>
-        )
     endif()
 
     find_package(X11 REQUIRED)
