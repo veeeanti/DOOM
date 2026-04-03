@@ -16,14 +16,12 @@
 
 static HWND s_hwnd;
 static HDC s_hdc;
-static BITMAPINFO s_bmi;
+static HDC s_memdc;
+static HBITMAP s_bitmap;
+static HBITMAP s_old_bitmap;
+static unsigned int *s_fb_bits;
 static unsigned int s_palette[256];
-static unsigned int s_pixels[SCREENWIDTH * SCREENHEIGHT];
-static unsigned int *s_pixels_integer = NULL;
-static int s_integer_width;
-static int s_integer_height;
-static int s_multiply = 4;
-static int s_smoothscale = 1;
+static BITMAPINFO s_bmi;
 static int s_initialized;
 static int s_grabmouse;
 static int s_rawinput;
@@ -33,118 +31,11 @@ static int s_ignore_mousemove;
 static int s_fullscreen;
 static RECT s_windowed_rect;
 static DWORD s_windowed_style;
+static int s_multiply;
+static int s_fb_width;
+static int s_fb_height;
 
 static void set_mouse_capture(HWND hwnd, int capture);
-
-static void ensure_integer_buffer(int width, int height)
-{
-    size_t count;
-
-    if (width <= 0 || height <= 0)
-        return;
-
-    if (s_pixels_integer && s_integer_width == width && s_integer_height == height)
-        return;
-
-    if (s_pixels_integer)
-    {
-        free(s_pixels_integer);
-        s_pixels_integer = NULL;
-    }
-
-    count = (size_t)width * (size_t)height;
-    s_pixels_integer = malloc(count * sizeof(unsigned int));
-    if (!s_pixels_integer)
-        I_Error("malloc failed for integer framebuffer");
-
-    s_integer_width = width;
-    s_integer_height = height;
-}
-
-static void scale_pixels_integer_nearest(int factor)
-{
-    int x, y;
-    int srcx, srcy;
-    int out_w;
-
-    if (factor < 1)
-        factor = 1;
-
-    out_w = SCREENWIDTH * factor;
-    ensure_integer_buffer(out_w, SCREENHEIGHT * factor);
-
-    for (y = 0; y < s_integer_height; ++y)
-    {
-        srcy = y / factor;
-        for (x = 0; x < s_integer_width; ++x)
-        {
-            srcx = x / factor;
-            s_pixels_integer[y * s_integer_width + x] = s_pixels[srcy * SCREENWIDTH + srcx];
-        }
-    }
-}
-
-static void center_mouse_cursor(HWND hwnd, int clip)
-{
-    RECT rc;
-    RECT clip_rc;
-    POINT center;
-
-    GetClientRect(hwnd, &rc);
-    center.x = (rc.left + rc.right) / 2;
-    center.y = (rc.top + rc.bottom) / 2;
-
-    clip_rc = rc;
-    MapWindowPoints(hwnd, NULL, (POINT *)&clip_rc, 2);
-    ClientToScreen(hwnd, &center);
-
-    if (clip)
-        ClipCursor(&clip_rc);
-
-    SetCursorPos(center.x, center.y);
-    s_ignore_mousemove = 1;
-}
-
-static void apply_fullscreen_state(void)
-{
-    if (!s_hwnd)
-        return;
-
-    if (s_fullscreen)
-    {
-        MONITORINFO mi;
-
-        s_windowed_style = (DWORD)GetWindowLong(s_hwnd, GWL_STYLE);
-        GetWindowRect(s_hwnd, &s_windowed_rect);
-
-        SetWindowLong(s_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-
-        mi.cbSize = sizeof(mi);
-        GetMonitorInfo(MonitorFromWindow(s_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
-
-        SetWindowPos(s_hwnd,
-                     HWND_TOP,
-                     mi.rcMonitor.left,
-                     mi.rcMonitor.top,
-                     mi.rcMonitor.right - mi.rcMonitor.left,
-                     mi.rcMonitor.bottom - mi.rcMonitor.top,
-                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    }
-    else
-    {
-        SetWindowLong(s_hwnd, GWL_STYLE, s_windowed_style);
-        SetWindowPos(s_hwnd,
-                     NULL,
-                     s_windowed_rect.left,
-                     s_windowed_rect.top,
-                     s_windowed_rect.right - s_windowed_rect.left,
-                     s_windowed_rect.bottom - s_windowed_rect.top,
-                     SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    }
-
-    if (s_grabmouse)
-        set_mouse_capture(s_hwnd, 1);
-}
 
 static int translate_key(WPARAM vk)
 {
@@ -245,6 +136,27 @@ static void post_mouse_event(int buttons, int dx, int dy)
     D_PostEvent(&event);
 }
 
+static void center_mouse_cursor(HWND hwnd, int clip)
+{
+    RECT rc;
+    RECT clip_rc;
+    POINT center;
+
+    GetClientRect(hwnd, &rc);
+    center.x = (rc.left + rc.right) / 2;
+    center.y = (rc.top + rc.bottom) / 2;
+
+    clip_rc = rc;
+    MapWindowPoints(hwnd, NULL, (POINT *)&clip_rc, 2);
+    ClientToScreen(hwnd, &center);
+
+    if (clip)
+        ClipCursor(&clip_rc);
+
+    SetCursorPos(center.x, center.y);
+    s_ignore_mousemove = 1;
+}
+
 static void set_mouse_capture(HWND hwnd, int capture)
 {
     if (!hwnd)
@@ -299,6 +211,47 @@ static void set_mouse_capture(HWND hwnd, int capture)
         s_mousecaptured = 0;
         s_ignore_mousemove = 0;
     }
+}
+
+static void apply_fullscreen_state(void)
+{
+    if (!s_hwnd)
+        return;
+
+    if (s_fullscreen)
+    {
+        MONITORINFO mi;
+
+        s_windowed_style = (DWORD)GetWindowLong(s_hwnd, GWL_STYLE);
+        GetWindowRect(s_hwnd, &s_windowed_rect);
+
+        SetWindowLong(s_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(MonitorFromWindow(s_hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+
+        SetWindowPos(s_hwnd,
+                     HWND_TOP,
+                     mi.rcMonitor.left,
+                     mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+    else
+    {
+        SetWindowLong(s_hwnd, GWL_STYLE, s_windowed_style);
+        SetWindowPos(s_hwnd,
+                     NULL,
+                     s_windowed_rect.left,
+                     s_windowed_rect.top,
+                     s_windowed_rect.right - s_windowed_rect.left,
+                     s_windowed_rect.bottom - s_windowed_rect.top,
+                     SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+
+    if (s_grabmouse)
+        set_mouse_capture(s_hwnd, 1);
 }
 
 static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -502,14 +455,10 @@ void I_FinishUpdate(void)
     RECT rect;
     int client_w;
     int client_h;
-    int logical_w;
-    int logical_h;
-    int integer_factor;
     int dst_x;
     int dst_y;
     int dst_w;
     int dst_h;
-    int mode;
 
     if (!s_initialized)
         return;
@@ -529,15 +478,18 @@ void I_FinishUpdate(void)
     }
 
     for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; ++i)
-        s_pixels[i] = s_palette[screens[0][i]];
+        s_fb_bits[i] = s_palette[screens[0][i]];
 
     GetClientRect(s_hwnd, &rect);
     client_w = rect.right - rect.left;
     client_h = rect.bottom - rect.top;
+
+    if (client_w <= 0 || client_h <= 0)
+        return;
+
     dst_w = client_w;
     dst_h = client_h;
 
-    // Preserve a 4:3 presentation aspect so fullscreen does not look stretched.
     if (dst_w * 3 > dst_h * 4)
     {
         int fit_w = dst_h * 4 / 3;
@@ -553,26 +505,6 @@ void I_FinishUpdate(void)
         dst_h = fit_h;
     }
 
-    logical_w = dst_w;
-    logical_h = dst_h * 5 / 6;
-    if (logical_h < 1)
-        logical_h = 1;
-
-    integer_factor = logical_w / SCREENWIDTH;
-    if (logical_h / SCREENHEIGHT < integer_factor)
-        integer_factor = logical_h / SCREENHEIGHT;
-    if (integer_factor < 1)
-        integer_factor = 1;
-
-    scale_pixels_integer_nearest(integer_factor);
-
-    // Hybrid scaling: nearest-neighbor integer upscale first, optional smooth
-    // pass only for the small fractional remainder to reduce blur.
-    mode = s_smoothscale ? HALFTONE : COLORONCOLOR;
-    SetStretchBltMode(s_hdc, mode);
-    if (mode == HALFTONE)
-        SetBrushOrgEx(s_hdc, 0, 0, NULL);
-
     if (dst_x > 0)
         PatBlt(s_hdc, 0, 0, dst_x, client_h, BLACKNESS);
     if (dst_x + dst_w < client_w)
@@ -582,8 +514,8 @@ void I_FinishUpdate(void)
     if (dst_y + dst_h < client_h)
         PatBlt(s_hdc, 0, dst_y + dst_h, client_w, client_h - (dst_y + dst_h), BLACKNESS);
 
-    s_bmi.bmiHeader.biWidth = s_integer_width;
-    s_bmi.bmiHeader.biHeight = -s_integer_height;
+    SetStretchBltMode(s_hdc, HALFTONE);
+    SetBrushOrgEx(s_hdc, 0, 0, NULL);
 
     StretchDIBits(s_hdc,
                   dst_x,
@@ -592,9 +524,9 @@ void I_FinishUpdate(void)
                   dst_h,
                   0,
                   0,
-                  s_integer_width,
-                  s_integer_height,
-                  s_pixels_integer,
+                  s_fb_width,
+                  s_fb_height,
+                  s_fb_bits,
                   &s_bmi,
                   DIB_RGB_COLORS,
                   SRCCOPY);
@@ -621,6 +553,24 @@ void I_ShutdownGraphics(void)
 {
     set_mouse_capture(s_hwnd, 0);
 
+    if (s_memdc && s_old_bitmap)
+    {
+        SelectObject(s_memdc, s_old_bitmap);
+        s_old_bitmap = NULL;
+    }
+
+    if (s_bitmap)
+    {
+        DeleteObject(s_bitmap);
+        s_bitmap = NULL;
+    }
+
+    if (s_memdc)
+    {
+        DeleteDC(s_memdc);
+        s_memdc = NULL;
+    }
+
     if (s_hdc)
     {
         ReleaseDC(s_hwnd, s_hdc);
@@ -633,14 +583,7 @@ void I_ShutdownGraphics(void)
         s_hwnd = NULL;
     }
 
-    if (s_pixels_integer)
-    {
-        free(s_pixels_integer);
-        s_pixels_integer = NULL;
-        s_integer_width = 0;
-        s_integer_height = 0;
-    }
-
+    s_fb_bits = NULL;
     s_initialized = 0;
 }
 
@@ -680,11 +623,6 @@ void I_InitGraphics(void)
         s_multiply = 5;
     if (M_CheckParm("-6"))
         s_multiply = 6;
-
-    if (M_CheckParm("-sharp"))
-        s_smoothscale = 0;
-    if (M_CheckParm("-smooth"))
-        s_smoothscale = 1;
 
     if (!M_CheckParm("-1")
         && !M_CheckParm("-2")
@@ -771,13 +709,33 @@ void I_InitGraphics(void)
     if (!s_hdc)
         I_Error("GetDC failed");
 
+    s_memdc = CreateCompatibleDC(s_hdc);
+    if (!s_memdc)
+        I_Error("CreateCompatibleDC failed");
+
+    s_fb_width = SCREENWIDTH;
+    s_fb_height = SCREENHEIGHT;
+
     memset(&s_bmi, 0, sizeof(s_bmi));
     s_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    s_bmi.bmiHeader.biWidth = SCREENWIDTH;
-    s_bmi.bmiHeader.biHeight = -SCREENHEIGHT;
+    s_bmi.bmiHeader.biWidth = s_fb_width;
+    s_bmi.bmiHeader.biHeight = -s_fb_height;
     s_bmi.bmiHeader.biPlanes = 1;
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;
+
+    s_bitmap = CreateDIBSection(s_hdc,
+                                &s_bmi,
+                                DIB_RGB_COLORS,
+                                (void **)&s_fb_bits,
+                                NULL,
+                                0);
+    if (!s_bitmap)
+        I_Error("CreateDIBSection failed");
+
+    s_old_bitmap = (HBITMAP)SelectObject(s_memdc, s_bitmap);
+    if (!s_old_bitmap)
+        I_Error("SelectObject failed");
 
     {
         RAWINPUTDEVICE raw_device;

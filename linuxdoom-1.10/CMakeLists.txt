@@ -78,7 +78,6 @@ if(WIN32)
         win32/i_sound_win32.c
         win32/ogg_temp.c
         win32/stb_vorbis.c
-        win32/i_net_stub.c
         ${CMAKE_CURRENT_BINARY_DIR}/doom.rc
     )
 else()

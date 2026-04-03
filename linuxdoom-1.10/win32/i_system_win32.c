@@ -14,7 +14,6 @@
 #include "i_video.h"
 #include "m_misc.h"
 #include "win32/discord_rpc_win32.h"
-#include "win32/steam_transport.h"
 
 int mb_used = 6;
 
