@@ -3,6 +3,8 @@
 //
 //  OGG file to WAV temporary conversion for sound system
 //
+//  This is rea;;y just for SIGIL using .ogg music files.
+//
 //  veeλnti is responsible for this
 //----------------------------------------------------------
 
