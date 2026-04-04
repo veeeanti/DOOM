@@ -30,8 +30,14 @@
 // Fixed to use builtin bool type with C++.
 #ifdef __cplusplus
 typedef bool boolean;
+#define false false
+#define true true
 #else
-typedef enum {false, true} boolean;
+#ifndef boolean
+typedef unsigned char boolean;
+#endif
+#define false 0
+#define true 1
 #endif
 typedef unsigned char byte;
 #endif

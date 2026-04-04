@@ -45,7 +45,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 // sky mapping
 //
 int			skyflatnum;
-int			skytexture;
+int			skytexture = 0;  // Initialize to safe default
 int			skytexturemid;
 
 

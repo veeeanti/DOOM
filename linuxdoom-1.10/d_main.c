@@ -54,6 +54,10 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "doomdef.h"
 #include "doomstat.h"
 
+#ifdef DOOM_ENABLE_DISCORD_RPC
+#include "win32/discord_rpc_win32.h"
+#endif
+
 #include "dstrings.h"
 #include "sounds.h"
 
@@ -84,6 +88,11 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "p_setup.h"
 #include "r_local.h"
 
+
+#include "d_player.h"
+extern  skill_t         d_skill;
+extern  int             d_episode;
+extern  int             d_map;
 
 #include "d_main.h"
 
@@ -140,7 +149,6 @@ char		mapdir[1024];           // directory of development maps
 char		basedefault[1024];      // default file
 
 
-void D_CheckNetGame (void);
 void D_ProcessEvents (void);
 void G_BuildTiccmd (ticcmd_t* cmd);
 void D_DoAdvanceDemo (void);
@@ -566,6 +574,7 @@ void D_AddFile (char *file)
 {
     int     numwadfiles;
     char    *newfile;
+    const char *wad_basename;
 	
     for (numwadfiles = 0 ; wadfiles[numwadfiles] ; numwadfiles++)
 	;
@@ -574,6 +583,17 @@ void D_AddFile (char *file)
     strcpy (newfile, file);
 	
     wadfiles[numwadfiles] = newfile;
+    
+    // Set WAD name for Discord RPC (use last WAD added, typically the main IWAD or PWAD)
+    wad_basename = strrchr(file, '/');
+    if (!wad_basename)
+        wad_basename = strrchr(file, '\\');
+    if (wad_basename)
+        wad_basename++;
+    else
+        wad_basename = file;
+    
+    I_SetWadName(wad_basename);
 }
 
 //
@@ -1171,11 +1191,6 @@ void D_DoomMain (void)
     printf ("I_Init: Setting up machine state.\n");
     I_Init ();
 
-    printf ("D_CheckNetGame: Checking network game status.\n");
-    D_CheckNetGame ();
-
-	M_OpenSteamBrowserAtStartup();
-
     printf ("S_Init: Setting up sound.\n");
     S_Init (snd_SfxVolume /* *8 */, snd_MusicVolume /* *8*/ );
 
@@ -1184,6 +1199,11 @@ void D_DoomMain (void)
 
     printf ("ST_Init: Init status bar.\n");
     ST_Init ();
+    
+    printf("Starting game initialization...\n");
+    
+    // Check network game status
+    D_CheckNetGame();
 
     // check for a driver that wants intermission stats
     p = M_CheckParm ("-statcopy");
@@ -1196,11 +1216,14 @@ void D_DoomMain (void)
 	printf ("External statistics registered.\n");
     }
     
+    printf("Checking game parameters...\n");
+    
     // start the apropriate game based on parms
     p = M_CheckParm ("-record");
 
     if (p && p < myargc-1)
     {
+        printf("Recording demo...\n");
 	G_RecordDemo (myargv[p+1]);
 	autostart = true;
     }
@@ -1208,6 +1231,7 @@ void D_DoomMain (void)
     p = M_CheckParm ("-playdemo");
     if (p && p < myargc-1)
     {
+        printf("Playing demo...\n");
 	singledemo = true;              // quit after one demo
 	G_DeferedPlayDemo (myargv[p+1]);
 	D_DoomLoop ();  // never returns
@@ -1216,6 +1240,7 @@ void D_DoomMain (void)
     p = M_CheckParm ("-timedemo");
     if (p && p < myargc-1)
     {
+        printf("Timing demo...\n");
 	G_TimeDemo (myargv[p+1]);
 	D_DoomLoop ();  // never returns
     }
@@ -1223,22 +1248,21 @@ void D_DoomMain (void)
     p = M_CheckParm ("-loadgame");
     if (p && p < myargc-1)
     {
+        printf("Loading game...\n");
 	if (M_CheckParm("-cdrom"))
 	    sprintf(file, "c:\\doomdata\\"SAVEGAMENAME"%c.dsg",myargv[p+1][0]);
 	else
 	    sprintf(file, SAVEGAMENAME"%c.dsg",myargv[p+1][0]);
 	G_LoadGame (file);
     }
-	
-
-    if ( gameaction != ga_loadgame )
+    else
     {
-	if (autostart || netgame)
-	    G_InitNew (startskill, startepisode, startmap);
-	else
-	    D_StartTitle ();                // start up intro loop
-
+        // Start at title screen by default
+        printf("Starting at title screen...\n");
+        D_StartTitle();
     }
 
+    printf("Starting game loop...\n");
+    if ( gameaction != ga_loadgame )
     D_DoomLoop ();  // never returns
 }

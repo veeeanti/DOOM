@@ -173,6 +173,13 @@ P_GiveWeapon
     boolean	gaveammo;
     boolean	gaveweapon;
 	
+    if (!player)
+	return false;
+
+    // Validate weapon index
+    if (weapon < 0 || weapon >= NUMWEAPONS)
+	return false;
+	
     if (netgame
 	&& (deathmatch!=2)
 	 && !dropped )
@@ -230,13 +237,17 @@ P_GiveBody
 ( player_t*	player,
   int		num )
 {
-    if (player->health >= MAXHEALTH)
+    if (!player)
+	return false;
+
+    if (player->health >= 9999)
 	return false;
 		
     player->health += num;
-    if (player->health > MAXHEALTH)
-	player->health = MAXHEALTH;
-    player->mo->health = player->health;
+    if (player->health > 9999)
+	player->health = 9999;
+    if (player->mo)
+	player->mo->health = player->health;
 	
     return true;
 }
@@ -254,14 +265,30 @@ P_GiveArmor
   int		armortype )
 {
     int		hits;
-	
-    hits = armortype*100;
-    if (player->armorpoints >= hits)
-	return false;	// don't pick up
-		
+
+    if (!player)
+	return false;
+
+    // Clamp armortype to valid range (1-9 for modern WADs)
+    if (armortype < 1)
+	armortype = 1;
+    if (armortype > 9)
+	armortype = 9;
+
+    hits = armortype * 100;
+
+    // Allow picking up armor if we have less than the new amount
+    // or if we have no armor at all
+    if (player->armorpoints >= hits && player->armortype >= armortype)
+	return false;
+
     player->armortype = armortype;
     player->armorpoints = hits;
-	
+
+    // Clamp armorpoints to reasonable max for modern WADs
+    if (player->armorpoints > 9999)
+	player->armorpoints = 9999;
+
     return true;
 }
 
@@ -345,6 +372,9 @@ P_TouchSpecialThing
     fixed_t	delta;
     int		sound;
 		
+    if (!special || !toucher)
+	return;
+
     delta = special->z - toucher->z;
 
     if (delta > toucher->height
@@ -390,8 +420,8 @@ P_TouchSpecialThing
 	
       case SPR_BON2:
 	player->armorpoints++;		// can go over 100%
-	if (player->armorpoints > 200)
-	    player->armorpoints = 200;
+	if (player->armorpoints > 9999)
+	    player->armorpoints = 9999;
 	if (!player->armortype)
 	    player->armortype = 1;
 	player->message = GOTARMBONUS;
@@ -661,6 +691,8 @@ P_TouchSpecialThing
 }
 
 
+//
+// KillMobj
 //
 // KillMobj
 //

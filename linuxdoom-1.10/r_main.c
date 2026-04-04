@@ -777,10 +777,10 @@ void R_Init (void)
     R_InitPointToAngle ();
     printf ("\nR_InitPointToAngle");
     R_InitTables ();
-    // viewwidth / viewheight / detailLevel are set by the defaults
     printf ("\nR_InitTables");
 
     R_SetViewSize (screenblocks, detailLevel);
+    printf ("\nR_SetViewSize");
     R_InitPlanes ();
     printf ("\nR_InitPlanes");
     R_InitLightTables ();
@@ -894,5 +894,6 @@ void R_RenderPlayerView (player_t* player)
     R_DrawMasked ();
 
     // Check for new console commands.
-    NetUpdate ();				
+    NetUpdate ();
+	
 }

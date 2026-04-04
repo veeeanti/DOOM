@@ -1,4 +1,12 @@
 
+//----------------------------------------------------------
+//            DOOM'93 Win32 sound system
+//
+//  WaveOut audio backend with OGG support and stb_vorbis
+//
+//  veeλnti is responsible for this
+//----------------------------------------------------------
+
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #include <mmsystem.h>

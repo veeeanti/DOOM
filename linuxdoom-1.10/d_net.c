@@ -30,7 +30,6 @@ static const char rcsid[] = "$Id: d_net.c,v 1.3 1997/02/03 22:01:47 b1 Exp $";
 #include "m_menu.h"
 #include "i_system.h"
 #include "i_video.h"
-#include "i_net.h"
 #include "g_game.h"
 #include "doomdef.h"
 #include "doomstat.h"
@@ -205,10 +204,7 @@ boolean HGetPacket (void)
 
     if (demoplayback)
 	return false;
-		
-    doomcom->command = CMD_GET;
-    I_NetCmd ();
-    
+		    
     if (doomcom->remotenode == -1)
 	return false;
 

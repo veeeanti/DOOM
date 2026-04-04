@@ -30,6 +30,7 @@ rcsid[] = "$Id: r_data.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 #include "i_system.h"
 #include "z_zone.h"
 
+#include <stdio.h>
 #include "m_swap.h"
 
 #include "w_wad.h"
@@ -58,16 +59,18 @@ rcsid[] = "$Id: r_data.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 // a patch or sprite is composed of zero or more columns.
 // 
 
+// WAD files store texture data in packed format with no padding.
+// MSVC adds padding by default, so we must use packed structs.
+// The WAD format uses:
+// - name: 8 bytes
+// - masked: 4 bytes (int, not boolean!)
+// - width: 2 bytes
+// - height: 2 bytes
+// - columndirectory: 4 bytes
+// - patchcount: 2 bytes
+// - patches: array of 10-byte mappatch_t structs
+#pragma pack(push, 1)
 
-
-//
-// Texture definition.
-// Each texture is composed of one or more patches,
-// with patches being lumps stored in the WAD.
-// The lumps are referenced by number, and patched
-// into the rectangular texture space using origin
-// and possibly other attributes.
-//
 typedef struct
 {
     short	originx;
@@ -77,22 +80,20 @@ typedef struct
     short	colormap;
 } mappatch_t;
 
-
-//
-// Texture definition.
-// A DOOM wall texture is a list of patches
-// which are to be combined in a predefined order.
-//
 typedef struct
 {
     char		name[8];
-    boolean		masked;	
+    int			masked;		// WAD uses 4-byte int, not boolean!
     short		width;
     short		height;
-    int		columndirectory;	// OBSOLETE on-disk field, always 32-bit
+    int			columndirectory;
     short		patchcount;
     mappatch_t	patches[1];
 } maptexture_t;
+
+#pragma pack(pop)
+
+#pragma pack(pop)
 
 
 // A single patch from a texture definition,
@@ -565,8 +566,14 @@ void R_InitTextures (void)
 	Z_Free (maptex2);
     
     // Precalculate whatever possible.	
+    printf("\nPrecalculating textures...");
     for (i=0 ; i<numtextures ; i++)
+    {
+        if (!(i&63))
+            printf(".");
 	R_GenerateLookup (i);
+    }
+    printf(" Done.\n");
     
     // Create translation table for global animation.
     texturetranslation = Z_Malloc ((numtextures + 1) * sizeof(*texturetranslation), PU_STATIC, 0);
@@ -642,7 +649,7 @@ void R_InitColormaps (void)
     length = W_LumpLength (lump) + 255; 
     colormaps = Z_Malloc (length, PU_STATIC, 0); 
     colormaps = (byte *)((((uintptr_t)colormaps) + 255u) & ~(uintptr_t)0xffu); 
-    W_ReadLump (lump,colormaps); 
+    W_ReadLump (lump, colormaps); 
 }
 
 
@@ -720,13 +727,18 @@ int	R_CheckTextureNumForName (char *name)
 int	R_TextureNumForName (char* name)
 {
     int		i;
+    char safe_name[9];
+    
+    // Make sure name is null-terminated for printing
+    strncpy(safe_name, name, 8);
+    safe_name[8] = '\0';
 	
     i = R_CheckTextureNumForName (name);
 
     if (i==-1)
     {
-	I_Error ("R_TextureNumForName: %s not found",
-		 name);
+        I_Error ("R_TextureNumForName: %s not found",
+                 safe_name);
     }
     return i;
 }
@@ -799,7 +811,15 @@ void R_PrecacheLevel (void)
     //  while the sky texture is stored like
     //  a wall texture, with an episode dependend
     //  name.
-    texturepresent[skytexture] = 1;
+    printf("Precaching sky texture: %d\n", skytexture);
+    if (skytexture >= 0 && skytexture < numtextures)
+    {
+        texturepresent[skytexture] = 1;
+    }
+    else
+    {
+        printf("Invalid skytexture index: %d (numtextures=%d)\n", skytexture, numtextures);
+    }
 	
     texturememory = 0;
     for (i=0 ; i<numtextures ; i++)

@@ -31,6 +31,11 @@
 
 // Endianess handling.
 // WAD files are stored little endian.
+// Force little-endian on Windows
+#ifdef _WIN32
+#define SHORT(x)	(x)
+#define LONG(x)         (x)
+#else
 #ifdef __BIG_ENDIAN__
 short	SwapSHORT(short);
 long	SwapLONG(long);
@@ -39,6 +44,7 @@ long	SwapLONG(long);
 #else
 #define SHORT(x)	(x)
 #define LONG(x)         (x)
+#endif
 #endif
 
 

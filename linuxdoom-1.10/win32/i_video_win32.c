@@ -1,3 +1,12 @@
+//----------------------------------------------------------
+//            DOOM'93 Win32 video renderer
+//
+//  Clean high-quality video renderer with modern scaling modes
+//  Supports integer scaling, smooth scaling, and sharp nearest
+//
+//  veeλnti is responsible for this
+//----------------------------------------------------------
+
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #include <windowsx.h>
@@ -16,12 +25,12 @@
 
 static HWND s_hwnd;
 static HDC s_hdc;
-static HDC s_memdc;
-static HBITMAP s_bitmap;
-static HBITMAP s_old_bitmap;
-static unsigned int *s_fb_bits;
-static unsigned int s_palette[256];
 static BITMAPINFO s_bmi;
+static unsigned int s_palette[256];
+static unsigned int s_pixels[320 * 200];
+static unsigned int *s_scalebuf = NULL;
+static int s_scalebuf_width;
+static int s_scalebuf_height;
 static int s_initialized;
 static int s_grabmouse;
 static int s_rawinput;
@@ -32,8 +41,8 @@ static int s_fullscreen;
 static RECT s_windowed_rect;
 static DWORD s_windowed_style;
 static int s_multiply;
-static int s_fb_width;
-static int s_fb_height;
+static int s_smooth;
+static int s_integer_scale;
 
 static void set_mouse_capture(HWND hwnd, int capture);
 
@@ -157,6 +166,11 @@ static void center_mouse_cursor(HWND hwnd, int clip)
     s_ignore_mousemove = 1;
 }
 
+static int should_grab_mouse(void)
+{
+    return s_grabmouse && gamestate == GS_LEVEL && !paused && !menuactive;
+}
+
 static void set_mouse_capture(HWND hwnd, int capture)
 {
     if (!hwnd)
@@ -168,6 +182,9 @@ static void set_mouse_capture(HWND hwnd, int capture)
         POINT center;
 
         if (s_mousecaptured)
+            return;
+
+        if (!should_grab_mouse())
             return;
 
         SetCapture(hwnd);
@@ -268,7 +285,7 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         return 0;
 
     case WM_SETFOCUS:
-        if (s_grabmouse)
+        if (should_grab_mouse())
             set_mouse_capture(hwnd, 1);
         return 0;
 
@@ -279,7 +296,7 @@ static LRESULT CALLBACK DoomWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE)
             set_mouse_capture(hwnd, 0);
-        else if (s_grabmouse)
+        else if (should_grab_mouse())
             set_mouse_capture(hwnd, 1);
         return 0;
 
@@ -437,6 +454,11 @@ void I_StartTic(void)
     if (!s_initialized)
         return;
 
+    if (should_grab_mouse() && !s_mousecaptured)
+        set_mouse_capture(s_hwnd, 1);
+    else if (!should_grab_mouse() && s_mousecaptured)
+        set_mouse_capture(s_hwnd, 0);
+
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
     {
         TranslateMessage(&msg);
@@ -446,6 +468,41 @@ void I_StartTic(void)
 
 void I_UpdateNoBlit(void)
 {
+}
+
+static void ensure_scale_buffer(int width, int height)
+{
+    if (s_scalebuf && s_scalebuf_width == width && s_scalebuf_height == height)
+        return;
+
+    if (s_scalebuf)
+    {
+        free(s_scalebuf);
+        s_scalebuf = NULL;
+    }
+
+    s_scalebuf = malloc((size_t)width * height * sizeof(unsigned int));
+    s_scalebuf_width = width;
+    s_scalebuf_height = height;
+}
+
+static void scale_pixels(int factor)
+{
+    int x, y, sx, sy;
+    int out_w = SCREENWIDTH * factor;
+    int out_h = SCREENHEIGHT * factor;
+
+    ensure_scale_buffer(out_w, out_h);
+
+    for (y = 0; y < out_h; y++)
+    {
+        sy = y / factor;
+        for (x = 0; x < out_w; x++)
+        {
+            sx = x / factor;
+            s_scalebuf[y * out_w + x] = s_pixels[sy * SCREENWIDTH + sx];
+        }
+    }
 }
 
 void I_FinishUpdate(void)
@@ -459,6 +516,10 @@ void I_FinishUpdate(void)
     int dst_y;
     int dst_w;
     int dst_h;
+    int scale_factor;
+    int scale_w;
+    int scale_h;
+    int mode;
 
     if (!s_initialized)
         return;
@@ -478,7 +539,7 @@ void I_FinishUpdate(void)
     }
 
     for (i = 0; i < SCREENWIDTH * SCREENHEIGHT; ++i)
-        s_fb_bits[i] = s_palette[screens[0][i]];
+        s_pixels[i] = s_palette[screens[0][i]];
 
     GetClientRect(s_hwnd, &rect);
     client_w = rect.right - rect.left;
@@ -490,6 +551,7 @@ void I_FinishUpdate(void)
     dst_w = client_w;
     dst_h = client_h;
 
+    // 4:3 aspect ratio correction
     if (dst_w * 3 > dst_h * 4)
     {
         int fit_w = dst_h * 4 / 3;
@@ -505,6 +567,7 @@ void I_FinishUpdate(void)
         dst_h = fit_h;
     }
 
+    // Black bars
     if (dst_x > 0)
         PatBlt(s_hdc, 0, 0, dst_x, client_h, BLACKNESS);
     if (dst_x + dst_w < client_w)
@@ -514,8 +577,45 @@ void I_FinishUpdate(void)
     if (dst_y + dst_h < client_h)
         PatBlt(s_hdc, 0, dst_y + dst_h, client_w, client_h - (dst_y + dst_h), BLACKNESS);
 
-    SetStretchBltMode(s_hdc, HALFTONE);
-    SetBrushOrgEx(s_hdc, 0, 0, NULL);
+    // Calculate best scale factor
+    scale_factor = dst_w / SCREENWIDTH;
+    if (dst_h / SCREENHEIGHT < scale_factor)
+        scale_factor = dst_h / SCREENHEIGHT;
+    if (scale_factor < 1)
+        scale_factor = 1;
+
+    scale_w = SCREENWIDTH * scale_factor;
+    scale_h = SCREENHEIGHT * scale_factor;
+
+    if (s_integer_scale)
+    {
+        // Integer scaling - sharp pixel-perfect
+        scale_pixels(scale_factor);
+
+        dst_x += (dst_w - scale_w) / 2;
+        dst_y += (dst_h - scale_h) / 2;
+        dst_w = scale_w;
+        dst_h = scale_h;
+
+        mode = COLORONCOLOR;
+    }
+    else if (s_smooth)
+    {
+        // Smooth scaling - clean bilinear
+        mode = HALFTONE;
+    }
+    else
+    {
+        // Nearest neighbor - classic pixel look
+        mode = COLORONCOLOR;
+    }
+
+    SetStretchBltMode(s_hdc, mode);
+    if (mode == HALFTONE)
+        SetBrushOrgEx(s_hdc, 0, 0, NULL);
+
+    s_bmi.bmiHeader.biWidth = s_integer_scale ? s_scalebuf_width : SCREENWIDTH;
+    s_bmi.bmiHeader.biHeight = -(s_integer_scale ? s_scalebuf_height : SCREENHEIGHT);
 
     StretchDIBits(s_hdc,
                   dst_x,
@@ -524,9 +624,9 @@ void I_FinishUpdate(void)
                   dst_h,
                   0,
                   0,
-                  s_fb_width,
-                  s_fb_height,
-                  s_fb_bits,
+                  s_integer_scale ? s_scalebuf_width : SCREENWIDTH,
+                  s_integer_scale ? s_scalebuf_height : SCREENHEIGHT,
+                  s_integer_scale ? s_scalebuf : s_pixels,
                   &s_bmi,
                   DIB_RGB_COLORS,
                   SRCCOPY);
@@ -553,24 +653,6 @@ void I_ShutdownGraphics(void)
 {
     set_mouse_capture(s_hwnd, 0);
 
-    if (s_memdc && s_old_bitmap)
-    {
-        SelectObject(s_memdc, s_old_bitmap);
-        s_old_bitmap = NULL;
-    }
-
-    if (s_bitmap)
-    {
-        DeleteObject(s_bitmap);
-        s_bitmap = NULL;
-    }
-
-    if (s_memdc)
-    {
-        DeleteDC(s_memdc);
-        s_memdc = NULL;
-    }
-
     if (s_hdc)
     {
         ReleaseDC(s_hwnd, s_hdc);
@@ -583,7 +665,12 @@ void I_ShutdownGraphics(void)
         s_hwnd = NULL;
     }
 
-    s_fb_bits = NULL;
+    if (s_scalebuf)
+    {
+        free(s_scalebuf);
+        s_scalebuf = NULL;
+    }
+
     s_initialized = 0;
 }
 
@@ -611,6 +698,16 @@ void I_InitGraphics(void)
         return;
     firsttime = 0;
 
+    // Single-instance check using a named mutex
+    {
+        HANDLE hMutex = CreateMutex(NULL, TRUE, "WinDoom_SingleInstance_Mutex");
+        if (hMutex && GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            // Another instance is already running, exit silently
+            exit(0);
+        }
+    }
+
     if (M_CheckParm("-1"))
         s_multiply = 1;
     if (M_CheckParm("-2"))
@@ -623,6 +720,10 @@ void I_InitGraphics(void)
         s_multiply = 5;
     if (M_CheckParm("-6"))
         s_multiply = 6;
+
+    s_smooth = M_CheckParm("-smooth") || !M_CheckParm("-sharp");
+    s_integer_scale = M_CheckParm("-integerscale") ? 1 : 0;
+    s_multiply = 4; // Default value
 
     if (!M_CheckParm("-1")
         && !M_CheckParm("-2")
@@ -674,8 +775,8 @@ void I_InitGraphics(void)
         I_Error("RegisterClass failed");
 
     style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    window_w = SCREENWIDTH * s_multiply;
-    window_h = (SCREENHEIGHT * 6 / 5) * s_multiply;
+    window_w = 320 * s_multiply;
+    window_h = (200 * 6 / 5) * s_multiply;
     rect.left = 0;
     rect.top = 0;
     rect.right = window_w;
@@ -709,33 +810,13 @@ void I_InitGraphics(void)
     if (!s_hdc)
         I_Error("GetDC failed");
 
-    s_memdc = CreateCompatibleDC(s_hdc);
-    if (!s_memdc)
-        I_Error("CreateCompatibleDC failed");
-
-    s_fb_width = SCREENWIDTH;
-    s_fb_height = SCREENHEIGHT;
-
     memset(&s_bmi, 0, sizeof(s_bmi));
     s_bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    s_bmi.bmiHeader.biWidth = s_fb_width;
-    s_bmi.bmiHeader.biHeight = -s_fb_height;
+    s_bmi.bmiHeader.biWidth = 320;
+    s_bmi.bmiHeader.biHeight = -200;
     s_bmi.bmiHeader.biPlanes = 1;
     s_bmi.bmiHeader.biBitCount = 32;
     s_bmi.bmiHeader.biCompression = BI_RGB;
-
-    s_bitmap = CreateDIBSection(s_hdc,
-                                &s_bmi,
-                                DIB_RGB_COLORS,
-                                (void **)&s_fb_bits,
-                                NULL,
-                                0);
-    if (!s_bitmap)
-        I_Error("CreateDIBSection failed");
-
-    s_old_bitmap = (HBITMAP)SelectObject(s_memdc, s_bitmap);
-    if (!s_old_bitmap)
-        I_Error("SelectObject failed");
 
     {
         RAWINPUTDEVICE raw_device;
@@ -748,9 +829,6 @@ void I_InitGraphics(void)
     }
 
     s_grabmouse = !M_CheckParm("-nograbmouse") || M_CheckParm("-grabmouse");
-
-    if (s_grabmouse)
-        set_mouse_capture(s_hwnd, 1);
 
     s_initialized = 1;
 }

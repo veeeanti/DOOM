@@ -96,7 +96,7 @@ void	P_PlayerThink (player_t* player);
 #define ONCEILINGZ		MAXINT
 
 // Time interval for item respawning.
-#define ITEMQUESIZE		128
+#define ITEMQUESIZE		1024
 
 extern mapthing_t	itemrespawnque[ITEMQUESIZE];
 extern int		itemrespawntime[ITEMQUESIZE];

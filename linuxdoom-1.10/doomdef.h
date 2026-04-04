@@ -178,6 +178,9 @@ typedef enum
 // The defined weapons,
 //  including a marker indicating
 //  user has not changed weapon.
+// Increased from 9 to 64 to support custom WADs with additional weapons
+#define MAX_WEAPONS 64
+
 typedef enum
 {
     wp_fist,

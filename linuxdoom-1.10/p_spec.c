@@ -29,6 +29,7 @@ static const char
 rcsid[] = "$Id: p_spec.c,v 1.6 1997/02/03 22:45:12 b1 Exp $";
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "doomdef.h"
 #include "doomstat.h"
@@ -78,8 +79,6 @@ typedef struct
     int		speed;
 } animdef_t;
 
-
-
 #define MAXANIMS                32
 
 extern anim_t	anims[MAXANIMS];
@@ -128,7 +127,7 @@ animdef_t		animdefs[] =
     {true,	"WFALL4",	"WFALL1",	8},
     {true,	"DBRAIN4",	"DBRAIN1",	8},
 	
-    {-1}
+    {-1, "", "", 0}  // Properly terminate the array
 };
 
 anim_t		anims[MAXANIMS];
@@ -148,17 +147,26 @@ extern  line_t*	linespeciallist[MAXLINEANIMS];
 void P_InitPicAnims (void)
 {
     int		i;
+    char safe_name[9];
 
     
     //	Init animation
     lastanim = anims;
-    for (i=0 ; animdefs[i].istexture != -1 ; i++)
+    for (i=0 ; i < MAXANIMS && animdefs[i].istexture != -1 ; i++)
     {
+        // Make sure name is null-terminated for printing
+        strncpy(safe_name, animdefs[i].startname, 8);
+        safe_name[8] = '\0';
+        // printf("Processing animation %d: %s\n", i, safe_name);
+        
 	if (animdefs[i].istexture)
 	{
 	    // different episode ?
 	    if (R_CheckTextureNumForName(animdefs[i].startname) == -1)
-		continue;	
+        {
+            // printf("Texture %s not found, skipping\n", safe_name);
+		    continue;	
+        }
 
 	    lastanim->picnum = R_TextureNumForName (animdefs[i].endname);
 	    lastanim->basepic = R_TextureNumForName (animdefs[i].startname);
@@ -166,7 +174,10 @@ void P_InitPicAnims (void)
 	else
 	{
 	    if (W_CheckNumForName(animdefs[i].startname) == -1)
-		continue;
+        {
+            // printf("Flat %s not found, skipping\n", safe_name);
+		    continue;
+        }
 
 	    lastanim->picnum = R_FlatNumForName (animdefs[i].endname);
 	    lastanim->basepic = R_FlatNumForName (animdefs[i].startname);

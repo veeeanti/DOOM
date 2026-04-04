@@ -77,7 +77,7 @@ const char snd_prefixen[]
 #define S_IFRACVOL		30
 
 #define NA			0
-#define S_NUMCHANNELS		2
+#define S_NUMCHANNELS		32
 
 
 // Current music/sfx card - index useless
@@ -268,16 +268,13 @@ S_StartSoundAtVolume
   mobj_t*	origin = (mobj_t *) origin_p;
   
   
-  // Debug.
-  /*fprintf( stderr,
-  	   "S_StartSoundAtVolume: playing sound %d (%s)\n",
-  	   sfx_id, S_sfx[sfx_id].name );*/
-  
   // check for bogus sound #
-  if (sfx_id < 1 || sfx_id > NUMSFX)
-    I_Error("Bad sfx #: %d", sfx_id);
+  if (sfx_id < 1 || sfx_id >= NUMSFX)
+    return;
   
   sfx = &S_sfx[sfx_id];
+  if (!sfx)
+    return;
   
   // Initialize sound parameters
   if (sfx->link)
@@ -470,7 +467,6 @@ S_StartSound
 
 void S_StopSound(void *origin)
 {
-
     int cnum;
 
     for (cnum=0 ; cnum<numChannels ; cnum++)

@@ -1,3 +1,11 @@
+//----------------------------------------------------------
+//            DOOM'93 Win32 system backend
+//
+//  High-resolution timer implementation, I/O, and system calls
+//
+//  veeλnti is responsible for this
+//----------------------------------------------------------
+
 #define boolean windows_boolean_workaround
 #include <windows.h>
 #undef boolean
@@ -58,7 +66,7 @@ int I_GetTime(void)
     QueryPerformanceCounter(&now);
     elapsed = now.QuadPart - s_qpbase.QuadPart;
 
-    return (int)((elapsed * TICRATE) / s_qpfreq.QuadPart);
+    return (int)((elapsed * 35) / s_qpfreq.QuadPart);
 }
 
 void I_Init(void)
@@ -69,7 +77,6 @@ void I_Init(void)
 void I_Quit(void)
 {
     D_QuitNetGame();
-    STEAM_ShutdownTransport();
     I_DiscordRPC_Shutdown();
     I_ShutdownSound();
     I_ShutdownMusic();
@@ -118,10 +125,9 @@ void I_Error(char *error, ...)
     if (demorecording)
         G_CheckDemoStatus();
 
-    D_QuitNetGame();
-    STEAM_ShutdownTransport();
-    I_DiscordRPC_Shutdown();
-    I_ShutdownGraphics();
+    // D_QuitNetGame();
+I_DiscordRPC_Shutdown();
+I_ShutdownGraphics();
 
     exit(-1);
 }

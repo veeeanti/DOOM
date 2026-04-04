@@ -545,6 +545,9 @@ int		iquetail;
 
 void P_RemoveMobj (mobj_t* mobj)
 {
+    if (!mobj)
+	return;
+
     if ((mobj->flags & MF_SPECIAL)
 	&& !(mobj->flags & MF_DROPPED)
 	&& (mobj->type != MT_INV)
@@ -562,7 +565,7 @@ void P_RemoveMobj (mobj_t* mobj)
     // unlink from sector and block lists
     P_UnsetThingPosition (mobj);
     
-    // stop any playing sound
+    // stop any playing sound (safe even if sound not initialized)
     S_StopSound (mobj);
     
     // free block

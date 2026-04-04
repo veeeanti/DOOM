@@ -26,6 +26,7 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "doomdef.h" 
 #include "doomstat.h"
@@ -461,12 +462,22 @@ void G_DoLoadLevel (void)
 	 || ( gamemode == pack_tnt )
 	 || ( gamemode == pack_plut ) )
     {
+	printf("Setting sky texture for commercial mode, gamemap=%d\n", gamemap);
 	skytexture = R_TextureNumForName ("SKY3");
+	printf("Set skytexture to SKY3: %d\n", skytexture);
 	if (gamemap < 12)
+	{
+	    printf("Gamemap < 12, setting SKY1\n");
 	    skytexture = R_TextureNumForName ("SKY1");
+	    printf("Set skytexture to SKY1: %d\n", skytexture);
+	}
 	else
 	    if (gamemap < 21)
+	    {
+		printf("Gamemap < 21, setting SKY2\n");
 		skytexture = R_TextureNumForName ("SKY2");
+		printf("Set skytexture to SKY2: %d\n", skytexture);
+	    }
     }
 
     levelstarttic = gametic;        // for time calculation
@@ -656,7 +667,7 @@ void G_Ticker (void)
     // get commands, check consistancy,
     // and build new consistancy check
     buf = (gametic/ticdup)%BACKUPTICS; 
- 
+
     for (i=0 ; i<MAXPLAYERS ; i++)
     {
 	if (playeringame[i]) 
@@ -675,8 +686,8 @@ void G_Ticker (void)
 		&& !(gametic&31) && ((gametic>>5)&3) == i )
 	    {
 		static char turbomessage[80];
-        extern char *player_names[4];
-        sprintf (turbomessage, "%s is turbo!",player_names[i]);
+                extern char *player_names[4];
+                sprintf (turbomessage, "%s is turbo!",player_names[i]);
 		players[consoleplayer].message = turbomessage;
 	    }
 			
@@ -1351,6 +1362,7 @@ void G_DoNewGame (void)
     netgame = false;
     deathmatch = false;
     playeringame[1] = playeringame[2] = playeringame[3] = 0;
+    playeringame[consoleplayer] = true;
     respawnparm = false;
     fastparm = false;
     nomonsters = false;
@@ -1371,11 +1383,15 @@ G_InitNew
 { 
     int             i; 
 	 
+    printf("G_InitNew: skill=%d, episode=%d, map=%d\n", skill, episode, map);
+	 
     if (paused) 
     { 
 	paused = false; 
 	S_ResumeSound (); 
     } 
+
+    printf("G_InitNew: Setting up game state\n"); 
 	
 
     if (skill > sk_nightmare) 
