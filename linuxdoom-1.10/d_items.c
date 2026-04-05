@@ -44,7 +44,7 @@ rcsid[] = "$Id:$";
 // atkstate, i.e. attack/fire/hit frame
 // flashstate, muzzle flash
 //
-weaponinfo_t	weaponinfo[NUMWEAPONS] =
+weaponinfo_t	weaponinfo[MAX_WEAPONS] =
 {
     {
 	// fist
@@ -126,7 +126,7 @@ weaponinfo_t	weaponinfo[NUMWEAPONS] =
 	S_DSGUN,
 	S_DSGUN1,
 	S_DSGUNFLASH1
-    },	
+    }
 };
 
 

@@ -107,54 +107,107 @@ P_GiveAmmo
     if (player->ammo[ammo] > player->maxammo[ammo])
 	player->ammo[ammo] = player->maxammo[ammo];
 
-    // If non zero ammo, 
-    // don't change up weapons,
-    // player was lower on purpose.
-    if (oldammo)
+     // If non zero ammo, 
+     // don't change up weapons,
+     // player was lower on purpose.
+     if (oldammo)
 	return true;	
 
-    // We were down to zero,
-    // so select a new weapon.
-    // Preferences are not user selectable.
-    switch (ammo)
-    {
-      case am_clip:
-	if (player->readyweapon == wp_fist)
-	{
-	    if (player->weaponowned[wp_chaingun])
-		player->pendingweapon = wp_chaingun;
-	    else
-		player->pendingweapon = wp_pistol;
-	}
-	break;
-	
-      case am_shell:
-	if (player->readyweapon == wp_fist
-	    || player->readyweapon == wp_pistol)
-	{
-	    if (player->weaponowned[wp_shotgun])
-		player->pendingweapon = wp_shotgun;
-	}
-	break;
-	
-      case am_cell:
-	if (player->readyweapon == wp_fist
-	    || player->readyweapon == wp_pistol)
-	{
-	    if (player->weaponowned[wp_plasma])
-		player->pendingweapon = wp_plasma;
-	}
-	break;
-	
-      case am_misl:
-	if (player->readyweapon == wp_fist)
-	{
-	    if (player->weaponowned[wp_missile])
-		player->pendingweapon = wp_missile;
-	}
-      default:
-	break;
-    }
+     // We were down to zero,
+     // so select a new weapon based on the ammo type.
+     // For modded weapons, we use the weapon associated with this ammo type
+     // from the weaponinfo array as a preference.
+     switch (ammo)
+     {
+       case am_clip:
+ 	if (player->readyweapon == wp_fist)
+ 	{
+ 	    // Prefer chaingun if available, then pistol
+ 	    if (player->weaponowned[wp_chaingun])
+ 		player->pendingweapon = wp_chaingun;
+ 	    else if (player->weaponowned[wp_pistol])
+ 		player->pendingweapon = wp_pistol;
+ 	    else
+ 	    {
+ 		// Find any weapon that uses clips
+ 		for (int i = 0; i < NUMWEAPONS; i++)
+ 		{
+ 		    if (weaponinfo[i].ammo == am_clip && player->weaponowned[i])
+ 		    {
+ 			player->pendingweapon = i;
+ 			break;
+ 		    }
+ 		}
+ 	    }
+ 	}
+ 	break;
+ 	
+       case am_shell:
+ 	if (player->readyweapon == wp_fist
+ 	    || player->readyweapon == wp_pistol)
+ 	{
+ 	    // Prefer shotgun if available
+ 	    if (player->weaponowned[wp_shotgun])
+ 		player->pendingweapon = wp_shotgun;
+ 	    else
+ 	    {
+ 		// Find any weapon that uses shells
+ 		for (int i = 0; i < NUMWEAPONS; i++)
+ 		{
+ 		    if (weaponinfo[i].ammo == am_shell && player->weaponowned[i])
+ 		    {
+ 			player->pendingweapon = i;
+ 			break;
+ 		    }
+ 		}
+ 	    }
+ 	}
+ 	break;
+ 	
+       case am_cell:
+ 	if (player->readyweapon == wp_fist
+ 	    || player->readyweapon == wp_pistol)
+ 	{
+ 	    // Prefer plasma rifle if available
+ 	    if (player->weaponowned[wp_plasma])
+ 		player->pendingweapon = wp_plasma;
+ 	    else
+ 	    {
+ 		// Find any weapon that uses cells
+ 		for (int i = 0; i < NUMWEAPONS; i++)
+ 		{
+ 		    if (weaponinfo[i].ammo == am_cell && player->weaponowned[i])
+ 		    {
+ 			player->pendingweapon = i;
+ 			break;
+ 		    }
+ 		}
+ 	    }
+ 	}
+ 	break;
+ 	
+       case am_misl:
+ 	if (player->readyweapon == wp_fist)
+ 	{
+ 	    // Prefer missile launcher if available
+ 	    if (player->weaponowned[wp_missile])
+ 		player->pendingweapon = wp_missile;
+ 	    else
+ 	    {
+ 		// Find any weapon that uses missiles
+ 		for (int i = 0; i < NUMWEAPONS; i++)
+ 		{
+ 		    if (weaponinfo[i].ammo == am_misl && player->weaponowned[i])
+ 		    {
+ 			player->pendingweapon = i;
+ 			break;
+ 		    }
+ 		}
+ 	    }
+ 	}
+       default:
+ 	break;
+     }
 	
     return true;
 }
@@ -176,8 +229,8 @@ P_GiveWeapon
     if (!player)
 	return false;
 
-    // Validate weapon index
-    if (weapon < 0 || weapon >= NUMWEAPONS)
+      // Validate weapon index
+      if (weapon < 0 || weapon >= MAX_WEAPONS)
 	return false;
 	
     if (netgame

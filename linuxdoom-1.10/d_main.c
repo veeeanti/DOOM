@@ -575,13 +575,13 @@ void D_AddFile (char *file)
     int     numwadfiles;
     char    *newfile;
     const char *wad_basename;
-	
+    
     for (numwadfiles = 0 ; wadfiles[numwadfiles] ; numwadfiles++)
 	;
 
     newfile = malloc (strlen(file)+1);
     strcpy (newfile, file);
-	
+    
     wadfiles[numwadfiles] = newfile;
     
     // Set WAD name for Discord RPC (use last WAD added, typically the main IWAD or PWAD)
@@ -594,6 +594,124 @@ void D_AddFile (char *file)
         wad_basename = file;
     
     I_SetWadName(wad_basename);
+}
+
+//
+// D_CheckAndSelectWads
+// Check for WAD files in current directory and let user select if multiple found
+//
+void D_CheckAndSelectWads(void)
+{
+    // Only check if no WADs were specified via -file parameter
+    if (!M_CheckParm("-file"))
+    {
+        char search_path[260];
+        WIN32_FIND_DATA find_data;
+        HANDLE find_handle;
+        int wad_count = 0;
+        char* wad_names[32];  // Max 32 WAD files
+        int i;
+        
+        // Search for .wad files in current directory
+        strcpy(search_path, "*.wad");
+        find_handle = FindFirstFile(search_path, &find_data);
+        
+        if (find_handle != INVALID_HANDLE_VALUE)
+        {
+            do
+            {
+                // Skip directories
+                if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                {
+                    // Allocate and store WAD filename
+                    wad_names[wad_count] = malloc(strlen(find_data.cFileName) + 1);
+                    strcpy(wad_names[wad_count], find_data.cFileName);
+                    wad_count++;
+                    
+                    // Limit to 32 WAD files
+                    if (wad_count >= 32)
+                        break;
+                }
+            } while (FindNextFile(find_handle, &find_data) && wad_count < 32);
+            
+            FindClose(find_handle);
+        }
+        
+        // If we found multiple WADs, let user select
+        if (wad_count > 1)
+        {
+            int selected = 0;
+            int valid_input = 0;
+            int c;
+            
+            // Simple text-based selection (in a real implementation, this would be a graphical menu)
+            printf("Multiple WAD files found. Select which to load:\n");
+            for (i = 0; i < wad_count; i++)
+            {
+                printf("%d: %s\n", i + 1, wad_names[i]);
+            }
+            
+            // Wait for valid user input
+            while (!valid_input)
+            {
+                printf("Enter selection (1-%d): ", wad_count);
+                fflush(stdout); // Ensure prompt is displayed before waiting for input
+                
+                // Read input character by character
+                char input[16] = {0};
+                int input_pos = 0;
+                
+                // Read until newline or buffer full
+                while ((c = getchar()) != '\n' && c != EOF && input_pos < 15)
+                {
+                    input[input_pos++] = (char)c;
+                }
+                
+                // Check if input is a valid number
+                if (input_pos > 0)
+                {
+                    // Convert string to integer
+                    selected = atoi(input);
+                    
+                    // Validate range (1 to wad_count)
+                    if (selected >= 1 && selected <= wad_count)
+                    {
+                        valid_input = 1;
+                        // Convert to zero-based index
+                        selected--;
+                    }
+                    else
+                    {
+                        printf("Invalid selection. Please enter a number between 1 and %d.\n", wad_count);
+                    }
+                }
+                else
+                {
+                    printf("Invalid input. Please enter a number.\n");
+                }
+                
+                // Clear any remaining input in buffer
+                while ((c = getchar()) != '\n' && c != EOF);
+            }
+            
+            // Add the selected WAD
+            D_AddFile(wad_names[selected]);
+            
+            // Free unused WAD names
+            for (i = 0; i < wad_count; i++)
+            {
+                if (i != selected)
+                    free(wad_names[i]);
+            }
+        }
+        else if (wad_count == 1)
+        {
+            // Only one WAD found, add it automatically
+            D_AddFile(wad_names[0]);
+            free(wad_names[0]);
+        }
+        // If no WADs found, the existing IdentifyVersion function will handle IWAD detection
+    }
 }
 
 //
@@ -1012,20 +1130,13 @@ void D_DoomMain (void)
 	      sprintf (file,"~"DEVMAPS"cdata/map%i.wad", p);
 	    break;
 	}
-	D_AddFile (file);
-    }
-	
-    p = M_CheckParm ("-file");
-    if (p)
-    {
-	// the parms after p are wadfile/lump names,
-	// until end of parms or another - preceded parm
-	modifiedgame = true;            // homebrew levels
-	while (++p != myargc && myargv[p][0] != '-')
-	    D_AddFile (myargv[p]);
-    }
-
-    p = M_CheckParm ("-playdemo");
+     D_AddFile (file);
+     }
+     
+     // Check for WAD files in current directory and let user select if multiple found
+     D_CheckAndSelectWads();
+     
+     p = M_CheckParm ("-playdemo");
 
     if (!p)
 	p = M_CheckParm ("-timedemo");
@@ -1074,20 +1185,98 @@ void D_DoomMain (void)
     if (p && p < myargc-1 && deathmatch)
 	printf("Austin Virtual Gaming: Levels will end after 20 minutes\n");
 
-    p = M_CheckParm ("-warp");
-    if (p && p < myargc-1)
-    {
-	if (gamemode == commercial)
-	    startmap = atoi (myargv[p+1]);
-	else
-	{
-	    startepisode = myargv[p+1][0]-'0';
-	    startmap = myargv[p+2][0]-'0';
-	}
-	autostart = true;
-    }
-    
-    // init subsystems
+     p = M_CheckParm ("-warp");
+     if (p && p < myargc-1)
+     {
+ 	if (gamemode == commercial)
+ 	    startmap = atoi (myargv[p+1]);
+ 	else
+ 	{
+ 	    startepisode = myargv[p+1][0]-'0';
+ 	    startmap = myargv[p+2][0]-'0';
+ 	}
+ 	autostart = true;
+     }
+     
+      // Parse custom launch arguments and process them after standard arguments
+      // Find all instances of -args and collect the following arguments
+      int args_count = 0;
+      char **args_to_process = NULL;
+      
+      for (;;)
+      {
+          p = M_CheckParm ("-args");
+          if (!p || p >= myargc-1)
+              break;  // No more -args, or -args is last argument (nothing to process)
+          
+          // Count how many arguments follow this -args (until next -args or end)
+          int num_following_args = 0;
+          while (p + 1 + num_following_args < myargc && 
+                 strcmp(myargv[p + 1 + num_following_args], "-args") != 0)
+          {
+              num_following_args++;
+          }
+          
+          // If we found following arguments, collect them for processing
+          if (num_following_args > 0)
+          {
+              // Resize our array to hold these new arguments
+              args_to_process = realloc(args_to_process, sizeof(char*) * (args_count + num_following_args));
+              
+              // Copy the following arguments
+              for (int i = 0; i < num_following_args; i++)
+              {
+                  args_to_process[args_count + i] = myargv[p + 1 + i];
+              }
+              args_count += num_following_args;
+          }
+          
+          // Remove this -args token and its following arguments by shifting
+          int shift_amount = 1 + num_following_args; // -args plus its following args
+          for (int i = p; i < myargc - shift_amount; i++)
+          {
+              myargv[i] = myargv[i + shift_amount];
+          }
+          myargc -= shift_amount;
+      }
+      
+      // Process the collected arguments as if they were standard DOOM arguments
+      // We do this by temporarily extending myargv/myargc and then restoring
+      if (args_count > 0)
+      {
+          // Save original state
+          int original_argc = myargc;
+          char **original_argv = myargv;
+          
+          // Extend myargv to hold the additional arguments
+          myargv = realloc(myargv, sizeof(char*) * (myargc + args_count));
+          
+          // Append the collected arguments
+          for (int i = 0; i < args_count; i++)
+          {
+              myargv[myargc + i] = args_to_process[i];
+          }
+          myargc += args_count;
+          
+          // Re-process standard arguments with our new extended argument list
+          nomonsters = M_CheckParm ("-nomonsters");
+          respawnparm = M_CheckParm ("-respawn");
+          fastparm = M_CheckParm ("-fast");
+          devparm = M_CheckParm ("-devparm");
+          if (M_CheckParm ("-altdeath"))
+              deathmatch = 2;
+          else if (M_CheckParm ("-deathmatch"))
+              deathmatch = 1;
+          
+          // Restore original state
+          myargv = original_argv;
+          myargc = original_argc;
+          
+          // Free the collected arguments array
+          free(args_to_process);
+      }
+     
+     // init subsystems
     printf ("V_Init: allocate screens.\n");
     V_Init ();
 

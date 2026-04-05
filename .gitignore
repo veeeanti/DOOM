@@ -2,3 +2,5 @@ linuxdoom-1.10/build-win/
 linuxdoom-1.10/build/
 build/
 built/
+/linuxdoom-1.10/CMakeFiles
+linuxdoom-1.10/CMakeCache.txt

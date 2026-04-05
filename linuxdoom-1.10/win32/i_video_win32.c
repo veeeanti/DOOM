@@ -723,7 +723,6 @@ void I_InitGraphics(void)
 
     s_smooth = M_CheckParm("-smooth") || !M_CheckParm("-sharp");
     s_integer_scale = M_CheckParm("-integerscale") ? 1 : 0;
-    s_multiply = 4; // Default value
 
     if (!M_CheckParm("-1")
         && !M_CheckParm("-2")
@@ -732,6 +731,7 @@ void I_InitGraphics(void)
         && !M_CheckParm("-5")
         && !M_CheckParm("-6"))
     {
+        s_multiply = 4; // Default value
         RECT work;
         int work_w;
         int work_h;
