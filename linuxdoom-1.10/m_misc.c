@@ -253,6 +253,7 @@ default_t	defaults[] =
     {"show_messages",&showMessages, 1},
     
 
+#ifdef NORMALUNIX
     {"key_right",&key_right, KEY_RIGHTARROW},
     {"key_left",&key_left, KEY_LEFTARROW},
     {"key_up",&key_up, KEY_UPARROW},
