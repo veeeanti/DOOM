@@ -419,6 +419,12 @@ void D_DoomLoop (void)
 #endif
 
 	I_DiscordRPC_Update();
+
+	if (I_GetGrabMouse())
+	{
+		int should_grab = (gamestate == GS_LEVEL && !menuactive && !paused && !automapactive);
+		I_SetGrabMouse(should_grab);
+	}
     }
 }
 
@@ -588,7 +594,17 @@ void IdentifyVersion (void)
     char*	plutoniawad = NULL;
     char*	tntwad = NULL;
 
+    // Secondary WAD paths (from ~/.doom directory)
+    char*	doom1wad2 = NULL;
+    char*	doomwad2 = NULL;
+    char*	doomuwad2 = NULL;
+    char*	doom2wad2 = NULL;
+    char*	doom2fwad2 = NULL;
+    char*	plutoniawad2 = NULL;
+    char*	tntwad2 = NULL;
+
 	char *doomwaddir;
+	char *doomwaddir2;
 #ifdef NORMALUNIX
     char *home;
 	char *homedrive;
@@ -596,36 +612,78 @@ void IdentifyVersion (void)
 #endif
     doomwaddir = getenv("DOOMWADDIR");
     if (!doomwaddir)
-	doomwaddir = ".";
+		doomwaddir = ".";
+
+#ifdef NORMALUNIX
+    home = getenv("HOME");
+    if (!home)
+    {
+	home = getenv("USERPROFILE");
+	if (!home)
+	{
+	    homedrive = getenv("HOMEDRIVE");
+	    homepath = getenv("HOMEPATH");
+	    if (homedrive && homepath)
+	    {
+		home = malloc(strlen(homedrive) + strlen(homepath) + 1);
+		sprintf(home, "%s%s", homedrive, homepath);
+	    }
+	}
+    }
+    if (!home)
+      I_Error("Please set HOME or USERPROFILE to your home directory");
+
+    // Second directory: ~/.doom
+    doomwaddir2 = malloc(strlen(home) + 6 + 1);
+    sprintf(doomwaddir2, "%s/.doom", home);
+#else
+    doomwaddir2 = "./wads";
+#endif
 
     // Commercial.
     doom2wad = malloc(strlen(doomwaddir)+1+9+1);
     sprintf(doom2wad, "%s/doom2.wad", doomwaddir);
 
+    // Also check second directory
+    doom2wad2 = malloc(strlen(doomwaddir2)+1+9+1);
+    sprintf(doom2wad2, "%s/doom2.wad", doomwaddir2);
+
     // Retail.
     doomuwad = malloc(strlen(doomwaddir)+1+8+1);
     sprintf(doomuwad, "%s/doomu.wad", doomwaddir);
+    doomuwad2 = malloc(strlen(doomwaddir2)+1+8+1);
+    sprintf(doomuwad2, "%s/doomu.wad", doomwaddir2);
     
     // Registered.
     doomwad = malloc(strlen(doomwaddir)+1+8+1);
     sprintf(doomwad, "%s/doom.wad", doomwaddir);
+    doomwad2 = malloc(strlen(doomwaddir2)+1+8+1);
+    sprintf(doomwad2, "%s/doom.wad", doomwaddir2);
     
     // Shareware.
     doom1wad = malloc(strlen(doomwaddir)+1+9+1);
     sprintf(doom1wad, "%s/doom1.wad", doomwaddir);
+    doom1wad2 = malloc(strlen(doomwaddir2)+1+9+1);
+    sprintf(doom1wad2, "%s/doom1.wad", doomwaddir2);
 
      // Bug, dear Shawn.
     // Insufficient malloc, caused spurious realloc errors.
     plutoniawad = malloc(strlen(doomwaddir)+1+/*9*/12+1);
     sprintf(plutoniawad, "%s/plutonia.wad", doomwaddir);
+    plutoniawad2 = malloc(strlen(doomwaddir2)+1+12+1);
+    sprintf(plutoniawad2, "%s/plutonia.wad", doomwaddir2);
 
     tntwad = malloc(strlen(doomwaddir)+1+9+1);
     sprintf(tntwad, "%s/tnt.wad", doomwaddir);
+    tntwad2 = malloc(strlen(doomwaddir2)+1+9+1);
+    sprintf(tntwad2, "%s/tnt.wad", doomwaddir2);
 
 
     // French stuff.
     doom2fwad = malloc(strlen(doomwaddir)+1+10+1);
     sprintf(doom2fwad, "%s/doom2f.wad", doomwaddir);
+    doom2fwad2 = malloc(strlen(doomwaddir2)+1+10+1);
+    sprintf(doom2fwad2, "%s/doom2f.wad", doomwaddir2);
 #ifdef NORMALUNIX
     home = getenv("HOME");
     if (!home)
@@ -699,10 +757,26 @@ void IdentifyVersion (void)
 	return;
     }
 
+    if ( doom2fwad2 && !access (doom2fwad2,R_OK) )
+    {
+	gamemode = commercial;
+	language = french;
+	printf("French version\n");
+	D_AddFile (doom2fwad2);
+	return;
+    }
+
     if ( doom2wad && !access (doom2wad,R_OK) )
     {
 	gamemode = commercial;
 	D_AddFile (doom2wad);
+	return;
+    }
+
+    if ( doom2wad2 && !access (doom2wad2,R_OK) )
+    {
+	gamemode = commercial;
+	D_AddFile (doom2wad2);
 	return;
     }
 
@@ -713,10 +787,24 @@ void IdentifyVersion (void)
       return;
     }
 
+    if ( plutoniawad2 &&!access (plutoniawad2, R_OK ) )
+    {
+      gamemode = commercial;
+      D_AddFile (plutoniawad2);
+      return;
+    }
+
     if ( tntwad && !access ( tntwad, R_OK ) )
     {
       gamemode = commercial;
       D_AddFile (tntwad);
+      return;
+    }
+
+    if ( tntwad2 && !access ( tntwad2, R_OK ) )
+    {
+      gamemode = commercial;
+      D_AddFile (tntwad2);
       return;
     }
 
@@ -727,6 +815,13 @@ void IdentifyVersion (void)
       return;
     }
 
+    if ( doomuwad2 && !access (doomuwad2,R_OK) )
+    {
+      gamemode = retail;
+      D_AddFile (doomuwad2);
+      return;
+    }
+
     if ( doomwad && !access (doomwad,R_OK) )
     {
       gamemode = registered;
@@ -734,10 +829,24 @@ void IdentifyVersion (void)
       return;
     }
 
+    if ( doomwad2 && !access (doomwad2,R_OK) )
+    {
+      gamemode = registered;
+      D_AddFile (doomwad2);
+      return;
+    }
+
     if ( doom1wad && !access (doom1wad,R_OK) )
     {
       gamemode = shareware;
       D_AddFile (doom1wad);
+      return;
+    }
+
+    if ( doom1wad2 && !access (doom1wad2,R_OK) )
+    {
+      gamemode = shareware;
+      D_AddFile (doom1wad2);
       return;
     }
 

@@ -89,24 +89,24 @@ else()
     )
 endif()
 
-add_executable(linuxxdoom
+add_library(doom STATIC
     ${DOOM_CORE_SOURCES}
     ${DOOM_PLATFORM_SOURCES}
 )
 
-target_include_directories(linuxxdoom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(doom PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
-    set_target_properties(linuxxdoom PROPERTIES OUTPUT_NAME doom)
+    set_target_properties(doom PROPERTIES OUTPUT_NAME doom)
 endif()
 
 if(WIN32)
-    target_compile_definitions(linuxxdoom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32 R_OK=4)
-    target_compile_definitions(linuxxdoom PRIVATE strcasecmp=_stricmp strncasecmp=_strnicmp)
-    target_link_libraries(linuxxdoom PRIVATE winmm)
+    target_compile_definitions(doom PRIVATE _CRT_SECURE_NO_WARNINGS LINUX _WIN32 R_OK=4)
+    target_compile_definitions(doom PRIVATE strcasecmp=_stricmp strncasecmp=_strnicmp)
+    target_link_libraries(doom PRIVATE winmm)
 else()
-    target_compile_definitions(linuxxdoom PRIVATE NORMALUNIX LINUX)
+    target_compile_definitions(doom PRIVATE NORMALUNIX LINUX)
     find_package(X11 REQUIRED)
-    target_include_directories(linuxxdoom PRIVATE ${X11_INCLUDE_DIR})
-    target_link_libraries(linuxxdoom PRIVATE ${X11_X11_LIB} ${X11_Xext_LIB} m)
+    target_include_directories(doom PRIVATE ${X11_INCLUDE_DIR})
+    target_link_libraries(doom PRIVATE ${X11_X11_LIB} ${X11_Xext_LIB} m)
 endif()

@@ -56,7 +56,8 @@ void I_EndRead (void);
 void I_ToggleFullscreen(void);
 int I_IsFullscreen(void);
 
-
+void I_SetGrabMouse(int grab);
+int I_GetGrabMouse(void);
 
 #endif
 //-----------------------------------------------------------------------------

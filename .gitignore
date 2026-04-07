@@ -2,3 +2,5 @@ linuxdoom-1.10/build-win/*
 build/
 .vscode/
 nul
+/linuxdoom-1.10/testb
+/linuxdoom-1.10/build2

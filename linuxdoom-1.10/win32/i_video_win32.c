@@ -630,3 +630,17 @@ void I_InitGraphics(void)
 
     s_initialized = 1;
 }
+
+void I_SetGrabMouse(int grab)
+{
+    s_grabmouse = grab;
+    if (!grab && s_mousecaptured)
+        set_mouse_capture(s_hwnd, 0);
+    else if (grab && s_hwnd && !s_mousecaptured)
+        set_mouse_capture(s_hwnd, 1);
+}
+
+int I_GetGrabMouse(void)
+{
+    return s_grabmouse;
+}
