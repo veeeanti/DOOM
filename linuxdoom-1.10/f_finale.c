@@ -718,7 +718,7 @@ void F_Drawer (void)
 	    else
 	      V_DrawPatch (0,0,0,
 			 W_CacheLumpName((W_CheckNumForName("HELP2") >= 0) ? "HELP2" : "HELP1", PU_CACHE));
-			 W_CacheLumpName("HELP2",PU_CACHE));
+			 W_CacheLumpName("HELP2",PU_CACHE);
 	    break;
 	  case 2:
 	    V_DrawPatch(0,0,0,
