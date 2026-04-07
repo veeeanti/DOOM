@@ -37,12 +37,19 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#ifdef NORMALUNIX
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#else
+
+#endif
 
 
 #include "doomdef.h"
@@ -508,7 +515,7 @@ void D_AdvanceDemo (void)
 	    if ( gamemode == retail )
 	      pagename = "CREDIT";
 	    else
-	      pagename = (W_CheckNumForName("HELP2") >= 0) ? "HELP2" : "HELP1";
+	      pagename = "HELP2";
 	}
 	break;
       case 5:
@@ -567,22 +574,21 @@ void D_AddFile (char *file)
 void IdentifyVersion (void)
 {
 
-	char*	doom1wad = NULL;
-	char*	doomwad = NULL;
-	char*	doomuwad = NULL;
-	char*	doom2wad = NULL;
+    char*	doom1wad = NULL;
+    char*	doomwad = NULL;
+    char*	doomuwad = NULL;
+    char*	doom2wad = NULL;
 
-	char*	doom2fwad = NULL;
-	char*	plutoniawad = NULL;
-	char*	tntwad = NULL;
+    char*	doom2fwad = NULL;
+    char*	plutoniawad = NULL;
+    char*	tntwad = NULL;
 
 	char *doomwaddir;
 #ifdef NORMALUNIX
-	char *home;
+    char *home;
 	char *homedrive;
 	char *homepath;
 #endif
-
     doomwaddir = getenv("DOOMWADDIR");
     if (!doomwaddir)
 	doomwaddir = ".";
@@ -636,7 +642,7 @@ void IdentifyVersion (void)
     sprintf(basedefault, "%s/.doomrc", home);
 #endif
 
-		if (M_CheckParm ("-shdev"))
+    if (M_CheckParm ("-shdev"))
     {
 	gamemode = shareware;
 	devparm = true;
@@ -677,7 +683,7 @@ void IdentifyVersion (void)
 	return;
     }
 
-	if (doom2fwad && !access (doom2fwad,R_OK) )
+    if ( doom2fwad && !access (doom2fwad,R_OK) )
     {
 	gamemode = commercial;
 	// C'est ridicule!
@@ -688,42 +694,42 @@ void IdentifyVersion (void)
 	return;
     }
 
-	if (doom2wad && !access (doom2wad,R_OK) )
+    if ( doom2wad && !access (doom2wad,R_OK) )
     {
 	gamemode = commercial;
 	D_AddFile (doom2wad);
 	return;
     }
 
-	if (plutoniawad && !access (plutoniawad, R_OK ) )
+    if ( plutoniawad &&!access (plutoniawad, R_OK ) )
     {
       gamemode = commercial;
       D_AddFile (plutoniawad);
       return;
     }
 
-	if (tntwad && !access ( tntwad, R_OK ) )
+    if ( tntwad && !access ( tntwad, R_OK ) )
     {
       gamemode = commercial;
       D_AddFile (tntwad);
       return;
     }
 
-	if (doomuwad && !access (doomuwad,R_OK) )
+    if ( doomuwad && !access (doomuwad,R_OK) )
     {
       gamemode = retail;
       D_AddFile (doomuwad);
       return;
     }
 
-	if (doomwad && !access (doomwad,R_OK) )
+    if ( doomwad && !access (doomwad,R_OK) )
     {
       gamemode = registered;
       D_AddFile (doomwad);
       return;
     }
 
-	if (doom1wad && !access (doom1wad,R_OK) )
+    if ( doom1wad && !access (doom1wad,R_OK) )
     {
       gamemode = shareware;
       D_AddFile (doom1wad);
@@ -1041,7 +1047,7 @@ void D_DoomMain (void)
 
     printf ("W_Init: Init WADfiles.\n");
     W_InitMultipleFiles (wadfiles);
-
+    
 	// Some Windows setups use a DOOM II IWAD renamed to doom.wad.
 	// Detect by map lump style and switch to commercial mode to avoid
 	// requesting registered-only assets like HELP2.
@@ -1052,8 +1058,6 @@ void D_DoomMain (void)
 	printf("Detected DOOM II-format IWAD in doom.wad; switching to commercial mode.\n");
 	gamemode = commercial;
 	}
-    
-
     // Check for -file in shareware
     if (modifiedgame)
     {
@@ -1152,7 +1156,7 @@ void D_DoomMain (void)
 	// for statistics driver
 	extern  void*	statcopy;                            
 
-	statcopy = (void*)(uintptr_t)strtoull(myargv[p+1], NULL, 0);
+	statcopy = (void*)atoi(myargv[p+1]);
 	printf ("External statistics registered.\n");
     }
     

@@ -13,6 +13,7 @@
 #include "i_system.h"
 #include "i_video.h"
 #include "m_misc.h"
+#include "win32/discord_rpc_win32.h"
 
 int mb_used = 6;
 

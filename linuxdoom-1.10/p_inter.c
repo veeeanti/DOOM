@@ -671,54 +671,11 @@ P_KillMobj
 {
     mobjtype_t	item;
     mobj_t*	mo;
-	boolean		duplicatemonster;
-	mobj_t*	duplicate;
-	int		dupindex;
-	fixed_t		splitdist;
-	fixed_t		dupx;
-	fixed_t		dupy;
-	angle_t		splitangle;
-	int		fineangle;
-
-	duplicatemonster = (target->flags & MF_COUNTKILL) && !target->player;
 	
     target->flags &= ~(MF_SHOOTABLE|MF_FLOAT|MF_SKULLFLY);
 
     if (target->type != MT_SKULL)
 	target->flags &= ~MF_NOGRAVITY;
-
-	if (duplicatemonster)
-	{
-	for (dupindex = 0; dupindex < 2; dupindex++)
-	{
-	    duplicate = P_SpawnMobj(target->x, target->y, target->z, target->type);
-	    duplicate->angle = target->angle;
-	    duplicate->health = duplicate->info->spawnhealth;
-	    duplicate->reactiontime = 0;
-	    duplicate->threshold = 0;
-	    duplicate->target = NULL;
-	    duplicate->tracer = NULL;
-
-	    splitangle = target->angle + (dupindex == 0 ? ANG90 : ANG270);
-	    fineangle = splitangle >> ANGLETOFINESHIFT;
-	    splitdist = target->radius + duplicate->radius + 16*FRACUNIT;
-	    dupx = target->x + FixedMul(splitdist, finecosine[fineangle]);
-	    dupy = target->y + FixedMul(splitdist, finesine[fineangle]);
-
-	    if (!P_TryMove(duplicate, dupx, dupy))
-	    {
-		splitdist += duplicate->radius;
-		dupx = target->x + FixedMul(splitdist, finecosine[fineangle]);
-		dupy = target->y + FixedMul(splitdist, finesine[fineangle]);
-		P_TryMove(duplicate, dupx, dupy);
-	    }
-
-	    duplicate->momx = FixedMul(duplicate->info->speed + FRACUNIT,
-		finecosine[fineangle]);
-	    duplicate->momy = FixedMul(duplicate->info->speed + FRACUNIT,
-		finesine[fineangle]);
-	}
-	}
 
     target->flags |= MF_CORPSE|MF_DROPOFF;
     target->height >>= 2;
@@ -769,8 +726,8 @@ P_KillMobj
     target->tics -= P_Random()&3;
 
     if (target->tics < 1)
-  	target->tics = 1;
-  		
+ 	target->tics = 1;
+ 		
     //	I_StartSound (&actor->r, actor->info->deathsound);
 
     // Drop stuff.

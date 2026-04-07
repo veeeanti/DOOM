@@ -100,3 +100,9 @@ void I_UnRegisterSong(int handle)
 {
     handle = 0;
 }
+
+void I_SetMusicLump(const char *name, int lumpnum)
+{
+    name = NULL;
+    lumpnum = 0;
+}

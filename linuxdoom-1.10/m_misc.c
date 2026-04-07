@@ -265,9 +265,12 @@ default_t	defaults[] =
     {"key_strafe",&key_strafe, KEY_RALT},
     {"key_speed",&key_speed, KEY_RSHIFT},
 
+// UNIX hack, to be removed. 
 #ifdef SNDSERV
     {"sndserver", &sndserver_filename, (intptr_t) "sndserver"},
     {"mb_used", &mb_used, 2},
+#endif
+    
 #endif
 
 #ifdef LINUX
