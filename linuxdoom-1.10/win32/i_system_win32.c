@@ -64,11 +64,13 @@ int I_GetTime(void)
 void I_Init(void)
 {
     I_InitSound();
+    I_DiscordRPC_Init();
 }
 
 void I_Quit(void)
 {
     D_QuitNetGame();
+    I_DiscordRPC_Shutdown();
     I_ShutdownSound();
     I_ShutdownMusic();
     M_SaveDefaults();

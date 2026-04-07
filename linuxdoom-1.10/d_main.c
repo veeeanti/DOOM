@@ -74,6 +74,9 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "i_system.h"
 #include "i_sound.h"
 #include "i_video.h"
+#ifdef _WIN32
+#include "win32/discord_rpc_win32.h"
+#endif
 
 #include "g_game.h"
 
@@ -414,6 +417,8 @@ void D_DoomLoop (void)
 	// Update sound output.
 	I_SubmitSound();
 #endif
+
+	I_DiscordRPC_Update();
     }
 }
 
